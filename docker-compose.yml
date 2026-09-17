@@ -1,0 +1,24 @@
+# VoiceLab AI en Docker (CPU). Para GPU NVIDIA añade docker-compose.gpu.yml (ver README).
+# En Windows con GPU se recomienda la instalación nativa (install.cmd): es más sencilla y rápida.
+services:
+  voicelab:
+    build:
+      context: .
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+        ENGINE_EXTRAS: audio,asr,f5tts,qwen3tts
+    image: voicelab-ai:1.0.0-cpu
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      DATA_DIR: /data
+      MODEL_DIR: /models
+      HF_HOME: /models/huggingface
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    ports:
+      - "127.0.0.1:8000:8000"   # solo accesible desde este equipo
+    restart: unless-stopped

@@ -1,0 +1,58 @@
+[project]
+name = "voicelab-backend"
+version = "1.0.0"
+description = "VoiceLab AI — backend local de clonación y generación de voz"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlmodel>=0.0.21",
+    "python-multipart>=0.0.9",
+    "num2words>=0.5.13",  # números en letra para la normalización de texto (LGPL)
+]
+
+[project.optional-dependencies]
+# Dependencias pesadas: se instalan por fase / por motor (ver docs/architecture.md §10).
+audio = ["numpy>=1.26", "scipy>=1.11", "soundfile>=0.12", "pyloudnorm>=0.1.1"]
+asr = ["faster-whisper>=1.1"]
+# Install with: pip install -e ".[f5tts]" -c constraints-torch.txt (keeps torch 2.8 cu128)
+f5tts = ["f5-tts>=1.1,<1.2"]
+qwen3tts = ["qwen-tts==0.1.1"]  # pins transformers==4.57.3; install with -c constraints-torch.txt
+dev = ["pytest>=8", "pytest-cov>=5", "httpx>=0.27", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # third-party deprecations inside FastAPI/Starlette's TestClient, not in VoiceLab code
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+skip_empty = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# User-facing Spanish catalogs have long strings; FastAPI Depends() defaults are idiomatic.
+extend-ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/core/errors.py" = ["E501"]
+"app/core/licenses.py" = ["E501"]

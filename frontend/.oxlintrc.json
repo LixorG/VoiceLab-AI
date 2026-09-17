@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "react",
+    "jsx-a11y",
+    "vitest",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "react/jsx-key": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "jsx-a11y/alt-text": "error",
+    "jsx-a11y/anchor-has-content": "error",
+    "jsx-a11y/role-has-required-aria-props": "error",
+    "jsx-a11y/aria-props": "error",
+    "react/react-in-jsx-scope": "off",
+    "react/set-state-in-effect": "off",
+    "react/refs": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "jsx-a11y/label-has-associated-control": "off",
+    "jsx-a11y/heading-has-content": "off",
+    "jsx-a11y/no-noninteractive-tabindex": "off",
+    "vitest/require-mock-type-parameters": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "react/exhaustive-effect-dependencies": "off"
+  },
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    "coverage"
+  ]
+}

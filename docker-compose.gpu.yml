@@ -1,0 +1,17 @@
+# GPU NVIDIA: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+# Requiere driver NVIDIA + nvidia-container-toolkit (Linux) o Docker Desktop con WSL2 (Windows).
+services:
+  voicelab:
+    build:
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu128
+    image: voicelab-ai:1.0.0-cuda
+    environment:
+      DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
