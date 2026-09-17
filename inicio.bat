@@ -3,13 +3,13 @@ chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
 :: ============================================================
-::  VoiceLab AI — Inicio rápido
-::  Doble clic para iniciar. Elige modo producción o desarrollo.
+::  VoiceLab AI - Inicio rapido
+::  Doble clic para iniciar. Elige modo produccion o desarrollo.
 :: ============================================================
 
-title VoiceLab AI — Iniciando...
+title VoiceLab AI - Iniciando...
 
-:: Ubicación raíz del proyecto (carpeta donde está este .bat)
+:: Ubicacion raiz del proyecto (carpeta donde esta este .bat)
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "PY=%ROOT%\backend\.venv\Scripts\python.exe"
@@ -19,7 +19,7 @@ set "DIST=%ROOT%\frontend\dist\index.html"
 set "BACKEND_URL=http://127.0.0.1:8000"
 set "DEV_URL=http://127.0.0.1:5173"
 
-:: ── Verificar instalación ───────────────────────────────────
+:: -- Verificar instalacion -------------------------------------
 if not exist "%PY%" (
     echo.
     echo  [ERROR] El entorno virtual no existe.
@@ -29,55 +29,55 @@ if not exist "%PY%" (
     exit /b 1
 )
 
-:: ── Menú de inicio ──────────────────────────────────────────
+:: -- Menu de inicio --------------------------------------------
 :MENU
 cls
 echo.
-echo  ╔══════════════════════════════════════════════════╗
-echo  ║           VoiceLab AI — Inicio Rápido           ║
-echo  ╠══════════════════════════════════════════════════╣
-echo  ║                                                  ║
-echo  ║   [1]  Modo Producción                           ║
-echo  ║        Backend + Frontend compilado              ║
-echo  ║        URL: http://127.0.0.1:8000                ║
-echo  ║                                                  ║
-echo  ║   [2]  Modo Desarrollo (hot-reload)              ║
-echo  ║        Backend en :8000 + Vite en :5173          ║
-echo  ║        URL: http://127.0.0.1:5173                ║
-echo  ║                                                  ║
-echo  ║   [3]  Salir                                     ║
-echo  ║                                                  ║
-echo  ╚══════════════════════════════════════════════════╝
+echo  ====================================================
+echo             VoiceLab AI - Inicio Rapido
+echo  ====================================================
+echo.
+echo   [1]  Modo Produccion
+echo        Backend + Frontend compilado
+echo        URL: http://127.0.0.1:8000
+echo.
+echo   [2]  Modo Desarrollo (hot-reload)
+echo        Backend en :8000 + Vite en :5173
+echo        URL: http://127.0.0.1:5173
+echo.
+echo   [3]  Salir
+echo.
+echo  ====================================================
 echo.
 set /p "OPCION=  Elige una opcion (1/2/3): "
 
 if "%OPCION%"=="1" goto PRODUCCION
 if "%OPCION%"=="2" goto DESARROLLO
 if "%OPCION%"=="3" exit /b 0
-echo  Opción no válida. Inténtalo de nuevo.
+echo  Opcion no valida. Intentalo de nuevo.
 timeout /t 2 >nul
 goto MENU
 
-:: ────────────────────────────────────────────────────────────
+:: ------------------------------------------------------------
 :PRODUCCION
-title VoiceLab AI — Modo Producción
+title VoiceLab AI - Modo Produccion
 cls
 echo.
-echo  [INFO] Iniciando en modo Producción...
+echo  [INFO] Iniciando en modo Produccion...
 echo  [INFO] URL: %BACKEND_URL%
 echo.
 
-:: Verificar si el puerto 8000 ya está en uso
+:: Verificar si el puerto 8000 ya esta en uso
 netstat -ano | findstr ":8000 " | findstr "LISTEN" >nul 2>&1
 if not errorlevel 1 (
-    echo  [AVISO] El puerto 8000 ya está en uso. ¿Está VoiceLab AI ya abierto?
+    echo  [AVISO] El puerto 8000 ya esta en uso. Esta VoiceLab AI ya abierto?
     echo          Cierra la instancia anterior o abre http://127.0.0.1:8000
     echo.
     pause
     goto MENU
 )
 
-:: Compilar frontend si no existe o está desactualizado
+:: Compilar frontend si no existe o esta desactualizado
 if not exist "%DIST%" (
     echo  [INFO] Compilando la interfaz por primera vez...
     call :COMPILAR_FRONTEND
@@ -89,19 +89,19 @@ if not exist "%DIST%" (
 )
 
 :: Abrir navegador cuando el servidor responda
-start "" /B cmd /c "timeout /t 5 >nul && :WAIT_PROD && curl -s --retry 60 --retry-delay 1 --retry-connrefused %BACKEND_URL%/api/system/health >nul 2>&1 && start %BACKEND_URL%"
+start "" /B cmd /c "timeout /t 5 >nul && curl -s --retry 60 --retry-delay 1 --retry-connrefused %BACKEND_URL%/api/system/health >nul 2>&1 && start %BACKEND_URL%"
 
-:: Iniciar backend (sirve también el frontend compilado)
-echo  [OK] Servidor iniciado. Abriendo navegador en cuanto esté listo...
+:: Iniciar backend (sirve tambien el frontend compilado)
+echo  [OK] Servidor iniciado. Abriendo navegador en cuanto este listo...
 echo       Presiona Ctrl+C para detener.
 echo.
 cd /d "%ROOT%"
 "%PY%" -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --log-level warning
 goto FIN
 
-:: ────────────────────────────────────────────────────────────
+:: ------------------------------------------------------------
 :DESARROLLO
-title VoiceLab AI — Modo Desarrollo
+title VoiceLab AI - Modo Desarrollo
 cls
 echo.
 echo  [INFO] Iniciando en modo Desarrollo...
@@ -109,7 +109,7 @@ echo  [INFO] Backend : http://127.0.0.1:8000
 echo  [INFO] Frontend: http://127.0.0.1:5173  (hot-reload activo)
 echo.
 
-:: Verificar que npm esté disponible
+:: Verificar que npm este disponible
 where npm >nul 2>&1
 if errorlevel 1 (
     echo  [ERROR] npm no encontrado. Instala Node.js desde https://nodejs.org
@@ -126,16 +126,16 @@ if not exist "%FRONTEND%\node_modules\" (
 )
 
 :: Iniciar backend en ventana separada con hot-reload
-start "VoiceLab — Backend :8000" cmd /k "title VoiceLab — Backend :8000 && cd /d "%ROOT%" && "%PY%" -m uvicorn app.main:app --app-dir backend --reload --reload-dir backend/app --host 127.0.0.1 --port 8000"
+start "VoiceLab - Backend :8000" cmd /k "title VoiceLab - Backend :8000 && cd /d "%ROOT%" && "%PY%" -m uvicorn app.main:app --app-dir backend --reload --reload-dir backend/app --host 127.0.0.1 --port 8000"
 
 :: Esperar un momento antes de iniciar el frontend
 timeout /t 2 >nul
 
 :: Iniciar frontend Vite en ventana separada
-start "VoiceLab — Frontend :5173" cmd /k "title VoiceLab — Frontend :5173 && cd /d "%FRONTEND%" && npm run dev"
+start "VoiceLab - Frontend :5173" cmd /k "title VoiceLab - Frontend :5173 && cd /d "%FRONTEND%" && npm run dev"
 
-:: Abrir navegador cuando Vite esté listo (espera el puerto 5173)
-echo  [INFO] Esperando que los servidores estén listos...
+:: Abrir navegador cuando Vite este listo
+echo  [INFO] Esperando que los servidores esten listos...
 timeout /t 4 >nul
 
 :: Abrir el navegador en la URL de desarrollo
@@ -151,7 +151,7 @@ echo.
 pause
 goto FIN
 
-:: ────────────────────────────────────────────────────────────
+:: ------------------------------------------------------------
 :COMPILAR_FRONTEND
 where npm >nul 2>&1
 if errorlevel 1 (
@@ -172,6 +172,6 @@ set "BUILD_ERR=%ERRORLEVEL%"
 popd
 exit /b %BUILD_ERR%
 
-:: ────────────────────────────────────────────────────────────
+:: ------------------------------------------------------------
 :FIN
 endlocal
