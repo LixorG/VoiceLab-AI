@@ -1,15 +1,20 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 
 import { Sidebar } from '@/components/layout/Sidebar'
 import { StatusBar } from '@/components/layout/StatusBar'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { ExperimentsPage } from '@/features/experiments/ExperimentsPage'
+import { Skeleton } from '@/components/ui/skeleton'
 import { GeneratePage } from '@/features/generation/GeneratePage'
-import { LibraryPage } from '@/features/library/LibraryPage'
-import { ProjectsPage } from '@/features/projects/ProjectsPage'
-import { ModelsPage } from '@/features/models/ModelsPage'
-import { SettingsPage } from '@/features/settings/SettingsPage'
-import { VoicesPage } from '@/features/voices/VoicesPage'
+import { LiveStatus, Shortcuts } from '@/features/shortcuts/Shortcuts'
+import { t } from '@/i18n/es'
+
+// The other sections load on demand: the first paint only pays for «Generar».
+const LibraryPage = lazy(() => import('@/features/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
+const VoicesPage = lazy(() => import('@/features/voices/VoicesPage').then((m) => ({ default: m.VoicesPage })))
+const ExperimentsPage = lazy(() => import('@/features/experiments/ExperimentsPage').then((m) => ({ default: m.ExperimentsPage })))
+const ProjectsPage = lazy(() => import('@/features/projects/ProjectsPage').then((m) => ({ default: m.ProjectsPage })))
+const ModelsPage = lazy(() => import('@/features/models/ModelsPage').then((m) => ({ default: m.ModelsPage })))
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 import { useSystemStore } from '@/stores/system'
 import { type Section, useUiStore } from '@/stores/ui'
 
@@ -50,13 +55,23 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full flex-col">
+        <a
+          href="#contenido"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:border focus:bg-panel focus:px-3 focus:py-2 focus:text-sm"
+        >
+          {t.a11y.skipToContent}
+        </a>
         <div className="flex min-h-0 flex-1">
           <Sidebar />
-          <main className="min-w-0 flex-1">
-            <SectionView section={section} />
+          <main id="contenido" className="min-w-0 flex-1">
+            <Suspense fallback={<div className="p-6"><Skeleton className="h-64" /></div>}>
+              <SectionView section={section} />
+            </Suspense>
           </main>
         </div>
         <StatusBar />
+        <Shortcuts />
+        <LiveStatus />
       </div>
     </TooltipProvider>
   )

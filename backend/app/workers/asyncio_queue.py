@@ -132,6 +132,25 @@ class AsyncioJobQueue:
         waiting = sum(1 for j in self._jobs.values() if j.state.status == JobStatus.QUEUED)
         return running, waiting
 
+    def snapshot(self) -> list[tuple[JobState, int]]:
+        """Jobs still alive (running first, then the waiting ones in order) with their queue position."""
+        queued = [jid for jid, j in self._jobs.items() if j.state.status == JobStatus.QUEUED]
+        alive = [(j.state.model_copy(), queued.index(jid) + 1 if jid in queued else 0)
+                 for jid, j in self._jobs.items() if not j.state.status.is_terminal]
+        return sorted(alive, key=lambda item: (item[1] if item[1] else -1))
+
+    async def cancel_all(self, include_running: bool = True) -> list[str]:
+        """Cancels every waiting job (and the running one unless asked otherwise). Returns the ids cancelled."""
+        cancelled = []
+        for job_id, job in list(self._jobs.items()):
+            if job.state.status.is_terminal:
+                continue
+            if job.state.status != JobStatus.QUEUED and not include_running:
+                continue
+            await self.cancel(job_id)
+            cancelled.append(job_id)
+        return cancelled
+
     def queued_position(self, job_id: str) -> int:
         queued = [jid for jid, j in self._jobs.items() if j.state.status == JobStatus.QUEUED]
         return queued.index(job_id) + 1 if job_id in queued else 0

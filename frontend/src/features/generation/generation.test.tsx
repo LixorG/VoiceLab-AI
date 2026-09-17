@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { GenerationList } from '@/features/generation/GenerationList'
 import { generationBlockers } from '@/features/generation/readiness'
 import { keyOf, useEngineStore } from '@/stores/engine'
 import { useGenerationStore } from '@/stores/generation'
+import { useReferencesStore } from '@/stores/references'
+import { useUiStore } from '@/stores/ui'
 import { f5Config, f5Summary, qwenConfig } from '@/test/engineFixtures'
 import type { ReferenceRead, TranscriptRead } from '@/types/api'
 import type { EngineRuntimeStatus, GenerationRead } from '@/types/generation'
@@ -113,6 +115,23 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
   useGenerationStore.setState({ items: [], text: '', referenceId: null, error: null, submitting: null })
   useEngineStore.setState({ engines: [f5Summary], config: implemented, engineId: 'f5tts', variantId: 'F5TTS_v1_Base', valuesByKey: { [keyOf('f5tts', 'F5TTS_v1_Base')]: { speed: 1.1, seed: null, nfe_steps: 24 } } })
+})
+
+describe('GenerationList empty state', () => {
+  it('points at «Voces» when there is no reference yet', async () => {
+    const load = useGenerationStore.getState().load
+    useReferencesStore.setState({ items: [] })
+    useGenerationStore.setState({ items: [], load: async () => undefined })
+    onTestFinished(() => useGenerationStore.setState({ load }))
+    render(
+      <TooltipProvider>
+        <GenerationList />
+      </TooltipProvider>,
+    )
+    expect(await screen.findByText('Empieza por una voz')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ir a Voces' }))
+    expect(useUiStore.getState().section).toBe('voices')
+  })
 })
 
 describe('GenerationList', () => {

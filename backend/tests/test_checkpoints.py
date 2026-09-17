@@ -98,6 +98,27 @@ def test_weights_status_download_and_load(client, monkeypatch, tmp_path):
     engine.unload()
 
 
+def test_vocabulary_from_the_repo_is_downloaded_and_used(client, monkeypatch, tmp_path):
+    body = {**SPANISH, "name": "F5 Español con vocab", "vocab_file": "vocab.txt"}
+    variant = client.post("/api/models/f5tts/checkpoints", json=body).json()["variant"]
+    assert client.post("/api/models/f5tts/checkpoints",
+                       json={**SPANISH, "name": "Mezcla", "vocab_file": "vocab.txt",
+                             "vocab_path": "C:/vocab.txt"}).status_code == 422
+
+    hub = FakeHub(root=tmp_path / "hub")
+    hub.install(monkeypatch)
+    install_module(monkeypatch, "f5_tts.api", F5TTS=FakeF5TTS)
+    engine = F5TTSBackend()
+    monkeypatch.setattr(engine, "is_installed", lambda: True)
+
+    engine.download_weights(variant)
+    assert (SPANISH["repo_id"], "vocab.txt") in hub.downloads
+    FakeF5TTS.instances.clear()
+    engine.load(variant, "cpu", "auto")
+    assert FakeF5TTS.instances[-1].vocab_file.endswith("vocab.txt")
+    engine.unload()
+
+
 def test_local_checkpoint_needs_its_file(client, monkeypatch, tmp_path):
     weights = tmp_path / "modelo.safetensors"
     weights.write_bytes(b"0")

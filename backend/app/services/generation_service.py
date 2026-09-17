@@ -34,6 +34,8 @@ from app.models.entities import Generation, GenerationSegment, ReferenceAudio, T
 from app.models.enums import JobStatus, ReferenceStatus
 from app.postprocess.config import PostProcessConfig
 from app.schemas.generation import (
+    MAX_BATCH,
+    BatchCreate,
     GenerationCreate,
     GenerationPlanRead,
     GenerationPostProcess,
@@ -88,6 +90,12 @@ class BuiltGeneration:
     warnings: list[str] = field(default_factory=list)
     text_changes: list[dict[str, str]] = field(default_factory=list)
     normalize_language: str | None = None
+
+
+def body_of_batch(body: BatchCreate, text: str, variant: str | None,
+                  params: dict[str, Any]) -> GenerationCreate:
+    return GenerationCreate(**{**body.model_dump(exclude={"texts", "variants", "repeat"}),
+                               "text": text, "variant": variant, "params": params})
 
 
 class GenerationService:
@@ -348,6 +356,36 @@ class GenerationService:
             parent = created[0].id if created else None
             created.append(await self.create(variant_body, kind="variation", parent_id=parent))
         return created
+
+    async def create_batch(self, body: BatchCreate) -> list[Generation]:
+        """Every text × variant × repetition, validated in full before anything is queued."""
+
+        variants = body.variants or [body.variant]
+        requests: list[tuple[GenerationCreate, str]] = []
+        for text in body.texts:
+            for variant in variants:
+                for index in range(body.repeat):
+                    params = dict(body.params)
+                    if body.repeat > 1 or params.get("seed") is None:
+                        params["seed"] = random.randint(0, SEED_MAX)
+                    label = f"{text[:28]}…" if len(text) > 29 else text
+                    if len(variants) > 1:
+                        label = f"{label} · {variant}"
+                    if body.repeat > 1:
+                        label = f"{label} ({index + 1}/{body.repeat})"
+                    requests.append((body_of_batch(body, text, variant, params), label))
+        if len(requests) > MAX_BATCH:
+            raise AppError(ErrorCode.VALIDATION_ERROR, status_code=422,
+                           message=f"El lote saldría de {len(requests)} generaciones y el máximo es {MAX_BATCH}. "
+                                   "Quita textos, variantes o repeticiones.",
+                           details={"total": len(requests), "maximo": MAX_BATCH})
+        for index, (request, _) in enumerate(requests):
+            try:
+                self.build(request)
+            except AppError as exc:
+                exc.details = {**(exc.details or {}), "elemento": index + 1}
+                raise
+        return [await self.create(request, label=label) for request, label in requests]
 
     # ------------------------------------------------------------------ queries
     def get(self, generation_id: str) -> Generation:

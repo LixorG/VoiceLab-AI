@@ -51,7 +51,8 @@ describe('App shell', () => {
   it('settings page shows environment checks and non-commercial licenses', async () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: 'Configuración' }))
-    expect(await screen.findByText('FFmpeg disponible')).toBeInTheDocument()
-    expect(await screen.findByText('No permitido')).toBeInTheDocument()
+    // The section loads on demand (lazy chunk), so give it room on a busy machine.
+    expect(await screen.findByText('FFmpeg disponible', {}, { timeout: 5000 })).toBeInTheDocument()
+    expect(await screen.findByText('No permitido', {}, { timeout: 5000 })).toBeInTheDocument()
   })
 })

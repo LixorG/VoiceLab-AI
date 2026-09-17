@@ -15,6 +15,8 @@ from app.postprocess.config import PostProcessCapabilities, PostProcessConfig
 from app.postprocess.processor import capabilities as postprocess_capabilities
 from app.schemas.experiment import RatingUpdate
 from app.schemas.generation import (
+    BatchAccepted,
+    BatchCreate,
     GenerationAccepted,
     GenerationCreate,
     GenerationPlanRead,
@@ -57,6 +59,15 @@ async def variations(body: VariationsCreate,
     created = await service.create_variations(GenerationCreate(**body.model_dump(exclude={"count"})), body.count)
     return [GenerationAccepted(generation=await service.to_read(g), job_id=g.id,
                                queue_position=service.queue.queued_position(g.id)) for g in created]
+
+
+@router.post("/batch", response_model=BatchAccepted, status_code=202,
+             summary="Encolar un lote (varios textos, variantes y repeticiones)")
+async def batch(body: BatchCreate, service: GenerationService = Depends(get_generation_service)) -> BatchAccepted:
+    created = await service.create_batch(body)
+    items = [GenerationAccepted(generation=await service.to_read(g), job_id=g.id,
+                                queue_position=service.queue.queued_position(g.id)) for g in created]
+    return BatchAccepted(items=items, total=len(items))
 
 
 @router.get("/postprocess/capabilities", response_model=PostProcessCapabilities,

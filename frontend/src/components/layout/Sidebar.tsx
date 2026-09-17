@@ -3,6 +3,7 @@ import {
   Boxes,
   FlaskConical,
   FolderKanban,
+  Keyboard,
   Library,
   Mic2,
   Moon,
@@ -81,7 +82,18 @@ export function Sidebar() {
         {NAV.map((item) => (
           <NavButton key={item.id} {...item} />
         ))}
-        <div className="mt-auto pb-2">
+        <div className="mt-auto space-y-1 pb-2">
+          <button
+            type="button"
+            aria-label={t.shortcuts.open}
+            title={t.shortcuts.open}
+            onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))}
+            className={cn('flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              sidebarCollapsed && 'justify-center px-0')}
+          >
+            <Keyboard className="size-[18px] shrink-0" />
+            {!sidebarCollapsed && <span>{t.shortcuts.title}</span>}
+          </button>
           <NavButton id="settings" label={t.nav.settings} icon={Settings2} />
         </div>
       </nav>

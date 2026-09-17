@@ -49,6 +49,31 @@ class VariationsCreate(GenerationCreate):
     count: int = Field(default=3, ge=2, le=8, description="Número de variaciones (semillas distintas)")
 
 
+MAX_BATCH = 60
+
+
+class BatchCreate(GenerationCreate):
+    """One base request expanded over several texts, variants and seeds (all combinations)."""
+
+    text: str = Field(default="lote", exclude=True)  # unused: each item brings its own text
+    texts: list[str] = Field(min_length=1, max_length=MAX_BATCH,
+                             description="Un texto por generación")
+    variants: list[str] = Field(default_factory=list, max_length=6,
+                                description="Variantes a comparar; vacío = la del cuerpo")
+    repeat: int = Field(default=1, ge=1, le=8, description="Repeticiones con semilla distinta")
+
+    @field_validator("texts")
+    @classmethod
+    def _texts(cls, values: list[str]) -> list[str]:
+        cleaned = [" ".join(v.split()) for v in values]
+        cleaned = [v for v in cleaned if v]
+        if not cleaned:
+            raise ValueError("Escribe al menos un texto.")
+        if any(len(v) > MAX_TEXT_CHARS for v in cleaned):
+            raise ValueError(f"Cada texto admite hasta {MAX_TEXT_CHARS} caracteres.")
+        return cleaned
+
+
 class PlannedSegmentRead(BaseModel):
     index: int
     text: str
@@ -125,3 +150,8 @@ class GenerationAccepted(BaseModel):
     generation: GenerationRead
     job_id: str
     queue_position: int
+
+
+class BatchAccepted(BaseModel):
+    items: list[GenerationAccepted]
+    total: int

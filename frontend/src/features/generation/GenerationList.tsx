@@ -12,6 +12,8 @@ import { t } from '@/i18n/es'
 import { cn, formatDuration } from '@/lib/utils'
 import { useEngineStore } from '@/stores/engine'
 import { useGenerationStore } from '@/stores/generation'
+import { useReferencesStore } from '@/stores/references'
+import { useUiStore } from '@/stores/ui'
 import { type GenerationRead, TERMINAL_STATUSES } from '@/types/generation'
 
 const tg = t.generation
@@ -191,6 +193,8 @@ function ComparePanel() {
 
 export function GenerationList() {
   const { items, load, compareIds } = useGenerationStore()
+  const references = useReferencesStore((s) => s.items)
+  const setSection = useUiStore((s) => s.setSection)
 
   useEffect(() => {
     void load()
@@ -206,6 +210,14 @@ export function GenerationList() {
         <ComparePanel />
         {items.length ? (
           items.map((gen) => <GenerationItem key={gen.id} gen={gen} variationIndex={variationIndexOf(items, gen)} />)
+        ) : references.length === 0 ? (
+          <div className="space-y-2 rounded-md border border-dashed p-4 text-sm">
+            <p className="font-medium">{t.emptyStart.title}</p>
+            <p className="text-muted-foreground">{t.emptyStart.body}</p>
+            <Button size="sm" variant="outline" onClick={() => setSection('voices')}>
+              {t.emptyStart.action}
+            </Button>
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">{tg.empty}</p>
         )}
