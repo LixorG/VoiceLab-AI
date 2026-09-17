@@ -22,6 +22,7 @@ from app.engines.base import (
     EngineCapabilities,
     EngineRequest,
     EngineResult,
+    EngineVariant,
     GenericControl,
     ParameterSpec,
     ParameterTooltip,
@@ -32,8 +33,11 @@ from app.engines.base import (
     random_seed,
 )
 from app.engines.common import hf_files_cached, prepare_hf_cache, reference_clip
+from app.engines.custom import CustomVariant, get_custom_variants, is_custom
 
 logger = logging.getLogger("voicelab.engines.f5")
+
+CUSTOM_DESCRIPTION = "Checkpoint personalizado añadido por ti."
 
 F5_SAMPLE_RATE = 24_000
 VOCOS_REPO = "charactr/vocos-mel-24khz"
@@ -60,6 +64,7 @@ class _ProgressAdapter:
 class FlowMatchingBackend(TTSBackend):
     required_packages = ("f5-tts",)
     implementation_phase: int | None = None
+    supports_custom_checkpoints = True
     #: variant id -> (Hugging Face repo, checkpoint file). Mirrors f5_tts.api.F5TTS naming.
     checkpoints: dict[str, tuple[str, str]] = {}
 
@@ -67,13 +72,31 @@ class FlowMatchingBackend(TTSBackend):
         self._model: Any = None
         self._variant: str | None = None
 
+    def builtin_variants(self) -> list[EngineVariant]:
+        """Official checkpoints of this engine; subclasses implement it."""
+        raise NotImplementedError
+
+    def variants(self) -> list[EngineVariant]:
+        custom = [EngineVariant(id=v.id, label=v.name, description=v.notes or CUSTOM_DESCRIPTION,
+                                source="custom", base_variant=v.base_variant, languages=v.languages or None,
+                                repo_id=v.repo_id, vram_estimate_mb=self._base_vram(v.base_variant))
+                  for v in get_custom_variants().for_engine(self.id)]
+        return [*self.builtin_variants(), *custom]
+
+    def _base_vram(self, base_variant: str) -> int | None:
+        return next((v.vram_estimate_mb for v in self.builtin_variants() if v.id == base_variant), None)
+
+    def _custom(self, variant: str | None) -> CustomVariant | None:
+        v = self.variant(variant)
+        return get_custom_variants().get(self.id, v.id) if is_custom(v.id) else None
+
     def capabilities(self, variant: str | None = None) -> EngineCapabilities:
         v = self.variant(variant)
         return EngineCapabilities(
             variant=v.id,
             mode="clone",
             sample_rate=F5_SAMPLE_RATE,
-            languages=["en", "zh"],
+            languages=v.languages or ["en", "zh"],
             requires_reference_audio=True,
             requires_reference_text=True,
             reference_duration_s=(3.0, 12.0),
@@ -111,6 +134,8 @@ class FlowMatchingBackend(TTSBackend):
                 "La transcripción de la referencia debe coincidir exactamente con el audio.",
                 "Referencias de más de ~12 s se recortan automáticamente en el modelo.",
                 "Para otros idiomas (p. ej. español) se necesita un checkpoint ajustado por la comunidad.",
+                *(["Checkpoint personalizado: los idiomas, la calidad y la licencia son los que declaraste al "
+                   "añadirlo; no hay forma de comprobarlos automáticamente."] if v.source == "custom" else []),
             ],
         )
 
@@ -200,16 +225,36 @@ class FlowMatchingBackend(TTSBackend):
     # Weights (only local cache checks; downloads happen on explicit request)
     # ------------------------------------------------------------------
     def _files(self, variant: str) -> list[tuple[str, str]]:
-        return [self.checkpoints[self.variant(variant).id], *((VOCOS_REPO, f) for f in VOCOS_FILES)]
+        """Hugging Face files this variant needs; a checkpoint stored on disk only needs the vocoder."""
+        custom = self._custom(variant)
+        vocoder = [(VOCOS_REPO, f) for f in VOCOS_FILES]
+        if custom is None:
+            return [self.checkpoints[self.variant(variant).id], *vocoder]
+        if custom.from_hub:
+            vocab = [(custom.repo_id, custom.vocab_file)] if custom.vocab_file else []
+            return [(custom.repo_id, custom.ckpt_file), *vocab, *vocoder]  # type: ignore[list-item]
+        return vocoder
 
     def weights_installed(self, variant: str) -> bool:
         if not self.is_installed():
             return False
+        custom = self._custom(variant)
+        if custom is not None and not custom.from_hub:
+            path = custom.resolved_path()
+            if path is None or not path.exists():
+                return False
         return all(hf_files_cached(repo, (filename,)) for repo, filename in self._files(variant))
 
     def download_weights(self, variant: str) -> None:
         from huggingface_hub import hf_hub_download
 
+        custom = self._custom(variant)
+        if custom is not None and not custom.from_hub:
+            path = custom.resolved_path()
+            if path is None or not path.exists():
+                raise AppError(ErrorCode.MODEL_NOT_INSTALLED, status_code=409,
+                               message="El archivo del checkpoint personalizado ya no está en su ruta.",
+                               details={"ruta": custom.local_path})
         prepare_hf_cache()
         for repo, filename in self._files(variant):
             hf_hub_download(repo_id=repo, filename=filename)
@@ -228,11 +273,26 @@ class FlowMatchingBackend(TTSBackend):
         from f5_tts.api import F5TTS
         from huggingface_hub import hf_hub_download
 
-        repo, filename = self.checkpoints[v]
-        ckpt = hf_hub_download(repo_id=repo, filename=filename, local_files_only=True)
+        custom = self._custom(v)
+        architecture, vocab = v, ""
+        if custom is None:
+            repo, filename = self.checkpoints[v]
+            ckpt = hf_hub_download(repo_id=repo, filename=filename, local_files_only=True)
+        else:
+            # The architecture name must stay one of f5-tts' own configs; the weights are the user's.
+            architecture = custom.base_variant
+            vocab = custom.vocab_path or ""
+            if custom.from_hub:
+                ckpt = hf_hub_download(repo_id=custom.repo_id, filename=custom.ckpt_file, local_files_only=True)
+                if custom.vocab_file:
+                    vocab = hf_hub_download(repo_id=custom.repo_id, filename=custom.vocab_file,
+                                            local_files_only=True)
+            else:
+                ckpt = str(custom.resolved_path())
         vocos_dir = Path(hf_hub_download(repo_id=VOCOS_REPO, filename=VOCOS_FILES[0], local_files_only=True)).parent
         self.unload()
-        self._model = F5TTS(model=v, ckpt_file=ckpt, vocoder_local_path=str(vocos_dir), device=device)
+        self._model = F5TTS(model=architecture, ckpt_file=ckpt, vocab_file=vocab,
+                            vocoder_local_path=str(vocos_dir), device=device)
         self._variant = v
 
     def unload(self) -> None:

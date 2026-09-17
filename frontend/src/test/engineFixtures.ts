@@ -39,8 +39,9 @@ export const f5Summary: EngineSummary = {
   implemented: false,
   implementation_phase: 5,
   license,
-  variants: [{ id: 'F5TTS_v1_Base', label: 'F5-TTS v1 Base', description: 'Checkpoint v1.', mode: 'clone', repo_id: 'SWivid/F5-TTS', vram_estimate_mb: 3000, download_size_mb: 1400 }],
+  variants: [{ id: 'F5TTS_v1_Base', label: 'F5-TTS v1 Base', description: 'Checkpoint v1.', mode: 'clone', repo_id: 'SWivid/F5-TTS', vram_estimate_mb: 3000, download_size_mb: 1400, source: 'builtin', base_variant: null, languages: null }],
   default_variant: 'F5TTS_v1_Base',
+  supports_custom_checkpoints: true,
 }
 
 export const qwenSummary: EngineSummary = {
@@ -51,8 +52,8 @@ export const qwenSummary: EngineSummary = {
   implementation_phase: 6,
   license: { ...license, weights: 'Apache-2.0', code: 'Apache-2.0', commercial_use: 'permitido' },
   variants: [
-    { id: 'base-1.7b', label: 'Clonación · 1.7B', description: 'Clona.', mode: 'clone', repo_id: 'Qwen/Qwen3-TTS-12Hz-1.7B-Base', vram_estimate_mb: 6000, download_size_mb: 4500 },
-    { id: 'custom-voice-1.7b', label: 'Voces predefinidas · 1.7B', description: 'Voces incluidas.', mode: 'custom_voice', repo_id: null, vram_estimate_mb: 6000, download_size_mb: 4500 },
+    { id: 'base-1.7b', label: 'Clonación · 1.7B', description: 'Clona.', mode: 'clone', repo_id: 'Qwen/Qwen3-TTS-12Hz-1.7B-Base', vram_estimate_mb: 6000, download_size_mb: 4500, source: 'builtin', base_variant: null, languages: null },
+    { id: 'custom-voice-1.7b', label: 'Voces predefinidas · 1.7B', description: 'Voces incluidas.', mode: 'custom_voice', repo_id: null, vram_estimate_mb: 6000, download_size_mb: 4500, source: 'builtin', base_variant: null, languages: null },
   ],
   default_variant: 'base-1.7b',
 }

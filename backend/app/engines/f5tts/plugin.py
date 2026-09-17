@@ -19,7 +19,7 @@ class F5TTSBackend(FlowMatchingBackend):
         "F5TTS_Base": ("SWivid/F5-TTS", "F5TTS_Base/model_1200000.safetensors"),
     }
 
-    def variants(self) -> list[EngineVariant]:
+    def builtin_variants(self) -> list[EngineVariant]:
         return [
             EngineVariant(id="F5TTS_v1_Base", label="F5-TTS v1 Base",
                           description="Checkpoint oficial recomendado (v1).",

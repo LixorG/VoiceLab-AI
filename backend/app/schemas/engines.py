@@ -16,6 +16,7 @@ class EngineSummary(BaseModel):
     implemented: bool = Field(description="La generación está disponible en esta versión")
     implementation_phase: int | None
     license: LicenseInfo
+    supports_custom_checkpoints: bool = False
     variants: list[EngineVariant]
     default_variant: str
 

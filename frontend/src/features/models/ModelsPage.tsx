@@ -1,9 +1,10 @@
 import { ExternalLink } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { CustomCheckpoints } from '@/features/models/CustomCheckpoints'
 import { SourceBadge } from '@/features/models/GenericControlRow'
 import { t } from '@/i18n/es'
 import { formatMegabytes } from '@/lib/utils'
@@ -70,7 +71,10 @@ function EngineCard({ engine }: { engine: EngineSummary }) {
                   aria-selected={v.id === variantId}
                 >
                   <td className="py-1.5 pr-3">
-                    <div>{v.label}</div>
+                    <div className="flex items-center gap-1.5">
+                      {v.label}
+                      {v.source === 'custom' && <Badge variant="accent">{t.checkpoints.badge}</Badge>}
+                    </div>
                     <div className="font-mono text-[10px] text-muted-foreground">{v.repo_id}</div>
                   </td>
                   <td className="py-1.5 pr-3">{te.models.mode[v.mode]}</td>
@@ -121,9 +125,11 @@ function EngineCard({ engine }: { engine: EngineSummary }) {
 export function ModelsPage() {
   const [engines, setEngines] = useState<EngineSummary[] | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     modelsApi.list().then(setEngines).catch(() => setEngines([]))
   }, [])
+
+  useEffect(load, [load])
 
   return (
     <div className="h-full overflow-y-auto">
@@ -133,6 +139,7 @@ export function ModelsPage() {
           <p className="text-sm text-muted-foreground">{te.models.subtitle}</p>
         </header>
         {engines == null ? <Skeleton className="h-64" /> : engines.map((e) => <EngineCard key={e.id} engine={e} />)}
+        <CustomCheckpoints onChanged={load} />
       </div>
     </div>
   )

@@ -16,7 +16,7 @@ class E2TTSBackend(FlowMatchingBackend):
     )
     checkpoints = {"E2TTS_Base": ("SWivid/E2-TTS", "E2TTS_Base/model_1200000.safetensors")}
 
-    def variants(self) -> list[EngineVariant]:
+    def builtin_variants(self) -> list[EngineVariant]:
         return [
             EngineVariant(id="E2TTS_Base", label="E2-TTS Base",
                           description="Transformer plano con conexiones tipo U-Net, entrenado en Emilia.",

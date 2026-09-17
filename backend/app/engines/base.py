@@ -71,6 +71,9 @@ class EngineVariant(BaseModel):
     repo_id: str | None = None
     vram_estimate_mb: int | None = Field(default=None, description="Estimación, no medición")
     download_size_mb: int | None = None
+    source: Literal["builtin", "custom"] = "builtin"
+    base_variant: str | None = Field(default=None, description="Arquitectura base de un checkpoint personalizado")
+    languages: list[str] | None = Field(default=None, description="Idiomas declarados por quien lo añadió")
 
 
 ReferenceStrategy = Literal["best_reference", "profile", "per_segment"]
@@ -212,6 +215,9 @@ class TTSBackend(ABC):
     # ----- description -----
     @abstractmethod
     def variants(self) -> list[EngineVariant]: ...
+
+    #: True when `load()` accepts a checkpoint the user provides (see app/engines/custom.py).
+    supports_custom_checkpoints: bool = False
 
     def default_variant(self) -> str:
         return self.variants()[0].id

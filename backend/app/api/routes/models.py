@@ -1,10 +1,13 @@
 """/api/models — TTS engines, variants, capabilities and dynamic parameter schemas."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
+from sqlmodel import Session
 
+from app.core.database import get_session
 from app.engines.base import PRESET_LABELS, EngineCapabilities, ParameterSpec, TTSBackend
 from app.engines.manager import EngineRuntimeStatus, LoadedModel, ModelManager, get_model_manager
 from app.engines.registry import EngineRegistry, get_engine_registry
+from app.schemas.checkpoints import CheckpointCreate, CheckpointRead
 from app.schemas.engines import (
     EngineConfig,
     EngineSummary,
@@ -12,11 +15,36 @@ from app.schemas.engines import (
     ValidateRequest,
     ValidateResponse,
 )
+from app.services.checkpoint_service import CheckpointService
 from app.services.generation_service import MODEL_LOAD_JOB, get_job_queue
 from app.workers.asyncio_queue import AsyncioJobQueue
 from app.workers.base import JobSpec, JobState
 
 router = APIRouter(prefix="/models", tags=["Modelos"])
+
+
+def get_checkpoint_service(session: Session = Depends(get_session),
+                           models: ModelManager = Depends(get_model_manager)) -> CheckpointService:
+    return CheckpointService(session, models)
+
+
+@router.get("/checkpoints", response_model=list[CheckpointRead], summary="Listar checkpoints personalizados")
+def list_checkpoints(engine: str | None = Query(default=None),
+                     service: CheckpointService = Depends(get_checkpoint_service)) -> list[CheckpointRead]:
+    return service.list(engine)
+
+
+@router.post("/{engine_id}/checkpoints", response_model=CheckpointRead, status_code=201,
+             summary="Añadir un checkpoint propio como variante")
+def add_checkpoint(engine_id: str, body: CheckpointCreate,
+                   service: CheckpointService = Depends(get_checkpoint_service)) -> CheckpointRead:
+    return service.create(engine_id, body)
+
+
+@router.delete("/checkpoints/{checkpoint_id}", status_code=204, summary="Quitar un checkpoint personalizado")
+def delete_checkpoint(checkpoint_id: str, service: CheckpointService = Depends(get_checkpoint_service)) -> Response:
+    service.delete(checkpoint_id)
+    return Response(status_code=204)
 
 
 def _summary(engine: TTSBackend) -> EngineSummary:
@@ -25,6 +53,7 @@ def _summary(engine: TTSBackend) -> EngineSummary:
         installed=engine.is_installed(), missing_packages=engine.missing_packages(),
         implemented=engine.implementation_phase is None, implementation_phase=engine.implementation_phase,
         license=engine.license, variants=engine.variants(), default_variant=engine.default_variant(),
+        supports_custom_checkpoints=engine.supports_custom_checkpoints,
     )
 
 

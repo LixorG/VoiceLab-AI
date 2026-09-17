@@ -8,15 +8,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
 from app import __version__
 from app.api.router import api_router
 from app.asr.manager import get_asr_manager
 from app.core.config import Settings, get_settings
-from app.core.database import init_engine
+from app.core.database import get_engine, init_engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.engines.manager import get_model_manager
+from app.services.checkpoint_service import refresh_store
 from app.services.generation_service import get_job_queue, mark_interrupted_generations
 from app.services.resources_service import ResourcesService, idle_monitor
 from app.web import mount_frontend
@@ -33,6 +35,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.apply_process_environment()
         configure_logging(settings.log_level, settings.data_dir / "logs")
         init_engine(settings)
+        with Session(get_engine()) as session:
+            refresh_store(session)  # custom checkpoints become engine variants
         mark_interrupted_generations()
         queue = get_job_queue()
         await queue.start()

@@ -107,6 +107,22 @@ class Project(TimestampMixin, table=True):
     exported_at: datetime | None = None
 
 
+class CustomCheckpoint(TimestampMixin, table=True):
+    """A checkpoint added by the user (community fine-tune or own training) offered as an extra variant."""
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    engine: str = Field(index=True)
+    name: str
+    slug: str = Field(index=True)  # variant id = "custom:<slug>"
+    base_variant: str  # architecture it was fine-tuned from
+    repo_id: str | None = None
+    ckpt_file: str | None = None
+    local_path: str | None = None
+    vocab_file: str | None = None  # vocabulary inside the same repo
+    vocab_path: str | None = None  # vocabulary on this machine
+    languages: list[str] | None = _json(default=None)
+    notes: str | None = None
+
+
 class PronunciationEntry(TimestampMixin, table=True):
     """User pronunciation dictionary: `term` is written as `replacement` before sending text to the engine."""
     id: str = Field(default_factory=_uuid, primary_key=True)

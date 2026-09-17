@@ -38,6 +38,9 @@ export interface EngineVariant {
   repo_id: string | null
   vram_estimate_mb: number | null
   download_size_mb: number | null
+  source: 'builtin' | 'custom'
+  base_variant: string | null
+  languages: string[] | null
 }
 
 export interface EngineCapabilities {
@@ -90,6 +93,7 @@ export interface EngineSummary {
   implemented: boolean
   implementation_phase: number | null
   license: LicenseInfo
+  supports_custom_checkpoints: boolean
   variants: EngineVariant[]
   default_variant: string
 }

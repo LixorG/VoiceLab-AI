@@ -80,8 +80,10 @@ class FakeHub:
 class FakeF5TTS:
     instances: list[FakeF5TTS] = []
 
-    def __init__(self, model: str, ckpt_file: str, vocoder_local_path: str, device: str) -> None:
+    def __init__(self, model: str, ckpt_file: str, vocoder_local_path: str, device: str,
+                 vocab_file: str = "") -> None:
         self.model, self.ckpt_file, self.vocoder_local_path, self.device = model, ckpt_file, vocoder_local_path, device
+        self.vocab_file = vocab_file
         self.calls: list[dict[str, Any]] = []
         FakeF5TTS.instances.append(self)
 
