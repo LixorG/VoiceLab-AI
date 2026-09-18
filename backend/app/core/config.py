@@ -46,9 +46,9 @@ class Settings(BaseSettings):
     default_model: str = "f5tts"
     enable_mock_engine: bool = False  # simulated engine for development/tests
     attn_implementation: Literal["auto", "sdpa", "flash_attention_2", "eager"] = "auto"
-    # Qwen3-TTS: replay its per-frame code predictor from CUDA graphs. Measured 2.4-2.8x end to end on the
-    # RTX 3080 Laptop with the same WER and speaker similarity; output is equal within bf16 precision, not
-    # bit-identical. False = the direct loop (bit-identical, ~1.2x).
+    # Qwen3-TTS: replay the talker decoder and the per-frame code predictor from CUDA graphs. Measured on the
+    # RTX 3080 Laptop: RTF ~7 -> ~0.6 (about 12x) with the same WER, speaker similarity and duration; output is
+    # equal within bf16 precision, not bit-identical. False = the direct predictor loop (bit-identical, ~1.2x).
     qwen_cuda_graphs: bool = True
 
     max_upload_mb: int = 500

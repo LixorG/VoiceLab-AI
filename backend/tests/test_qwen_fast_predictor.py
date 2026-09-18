@@ -101,23 +101,55 @@ def test_plugin_picks_graphs_then_direct_loop(monkeypatch, settings):
 
     engine = Qwen3TTSBackend()
     calls = []
-    monkeypatch.setattr(fast_predictor, "install_graphs", lambda model: calls.append("graphs") or True)
-    monkeypatch.setattr(fast_predictor, "install", lambda model: calls.append("loop") or True)
-    assert engine._accelerate("cuda") == "cuda_graphs" and calls == ["graphs"]
+    outcome = {"talker": True, "graphs": True, "loop": True}
+
+    def fake(name):
+        return lambda model: calls.append(name) or outcome[name]
+
+    for name, attr in (("talker", "install_talker_graphs"), ("graphs", "install_graphs"), ("loop", "install")):
+        monkeypatch.setattr(fast_predictor, attr, fake(name))
+    monkeypatch.setattr(engine, "_check_random_generator", lambda: calls.append("rng"))
+
+    assert engine._accelerate("cuda") == "cuda_graphs" and calls == ["talker", "graphs", "rng"]
 
     calls.clear()
     assert engine._accelerate("cpu") == "direct_loop" and calls == ["loop"]  # no graphs off the GPU
 
     calls.clear()
-    monkeypatch.setattr(fast_predictor, "install_graphs", lambda model: calls.append("graphs") or False)
-    assert engine._accelerate("cuda") == "direct_loop" and calls == ["graphs", "loop"]  # capture failed → loop
+    outcome["talker"] = False
+    assert engine._accelerate("cuda") == "cuda_graphs_partial" and calls == ["talker", "graphs", "rng"]
+
+    calls.clear()
+    outcome.update(talker=True, graphs=False)
+    assert engine._accelerate("cuda") == "cuda_graphs_partial" and calls == ["talker", "graphs", "rng", "loop"]
+
+    calls.clear()
+    outcome.update(talker=False, graphs=False)
+    assert engine._accelerate("cuda") == "direct_loop" and calls == ["talker", "graphs", "loop"]  # both failed
 
     calls.clear()
     monkeypatch.setattr(settings, "qwen_cuda_graphs", False)
     assert engine._accelerate("cuda") == "direct_loop" and calls == ["loop"]  # switched off in the settings
 
-    monkeypatch.setattr(fast_predictor, "install", lambda model: False)
+    outcome["loop"] = False
     assert engine._accelerate("cpu") == "none"
+
+
+def test_broken_random_generator_unloads_with_a_clear_message(monkeypatch):
+    from app.core.errors import AppError
+    from app.engines.qwen3tts.plugin import Qwen3TTSBackend
+
+    engine = Qwen3TTSBackend()
+    engine._model = object()
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("Offset increment outside graph capture encountered unexpectedly.")
+
+    monkeypatch.setattr(torch, "multinomial", broken)
+    monkeypatch.setattr(torch, "ones", lambda *a, **k: None)
+    with pytest.raises(AppError) as exc:
+        engine._check_random_generator()
+    assert "QWEN_CUDA_GRAPHS=false" in exc.value.message and engine._model is None
 
 
 def test_install_graphs_needs_a_cuda_model():

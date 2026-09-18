@@ -77,10 +77,10 @@ SPEAKERS = [
 _SAMPLING_NOTE = "Qwen3-TTS genera token a token con muestreo aleatorio."
 _PROGRESS_NOTE = ("El modelo no informa del progreso: VoiceLab lo estima contando los pasos de audio generados y "
                   "puede detener la generación a mitad si se cancela.")
-_SPEED_NOTE = ("Con GPU, VoiceLab reproduce el predictor de códigos desde CUDA graphs (medido en esta máquina: "
-               "entre 2,4 y 2,8 veces más rápido, con el mismo WER y la misma similitud de voz). El resultado es "
-               "equivalente dentro de la precisión del modelo, no idéntico bit a bit; se desactiva con "
-               "QWEN_CUDA_GRAPHS=false.")
+_SPEED_NOTE = ("Con GPU, VoiceLab reproduce el decodificador y el predictor de códigos desde CUDA graphs. Medido en "
+               "esta máquina: de unas 7 veces la duración del audio a unas 0,6 (más rápido que tiempo real), con el "
+               "mismo WER, la misma similitud de voz y la misma duración. Equivalente dentro de la precisión del "
+               "modelo, no idéntico bit a bit; se desactiva con QWEN_CUDA_GRAPHS=false.")
 MAX_CHARS_PER_CALL = 300  # long single calls are very slow (cost grows with length) and can loop without ending
 CHARS_PER_SECOND = 14.0  # typical speech rate, only used to estimate progress and a runaway limit
 RUNAWAY_FACTOR = 3.0
@@ -387,13 +387,35 @@ class Qwen3TTSBackend(TTSBackend):
                          "acceleration": self._accelerate(device)}
 
     def _accelerate(self, device: str) -> str:
-        """Speed up the per-frame code predictor (see fast_predictor): CUDA graphs on GPU, else a direct loop."""
+        """Speed up each audio frame (see fast_predictor): CUDA graphs on GPU, else a direct predictor loop.
+
+        `cuda_graphs` = talker decoder and code predictor graphed; `cuda_graphs_partial` = only one of them could
+        be captured; `direct_loop` = no graphs (bit-identical to the library); `none` = unexpected model layout.
+        """
         from app.core.config import get_settings
         from app.engines.qwen3tts import fast_predictor
 
-        if device == "cuda" and get_settings().qwen_cuda_graphs and fast_predictor.install_graphs(self._model):
-            return "cuda_graphs"
+        if device == "cuda" and get_settings().qwen_cuda_graphs:
+            talker = fast_predictor.install_talker_graphs(self._model)
+            predictor = fast_predictor.install_graphs(self._model)
+            if talker or predictor:
+                self._check_random_generator()
+                if not predictor:
+                    fast_predictor.install(self._model)
+                return "cuda_graphs" if talker and predictor else "cuda_graphs_partial"
         return "direct_loop" if fast_predictor.install(self._model) else "none"
+
+    def _check_random_generator(self) -> None:
+        """A capture that fails half-way can leave CUDA's random generator unusable: refuse to go on silently."""
+        import torch
+
+        try:
+            torch.multinomial(torch.ones(1, 4, device="cuda"), 1)
+        except RuntimeError as exc:
+            self.unload()
+            raise AppError(ErrorCode.MODEL_LOAD_ERROR, status_code=500,
+                           message="La aceleración de Qwen3-TTS dejó la GPU en un estado no válido. Pon "
+                                   "QWEN_CUDA_GRAPHS=false en el archivo .env y reinicia VoiceLab.") from exc
 
     def unload(self) -> None:
         self._model = None

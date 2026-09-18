@@ -1,13 +1,17 @@
-"""Lean replacement for the per-frame `code_predictor.generate()` call of Qwen3-TTS.
+"""Faster Qwen3-TTS frames: a lean code-predictor loop and CUDA graphs for the predictor and the talker decoder.
 
-For every audio frame (12.5 per second) the talker asks its code predictor for the 15 remaining codebooks through
-the generic Hugging Face `generate()`: a fixed-length loop of 2 + 14 tiny forward passes wrapped in a lot of
-per-call Python work (generation config, logits processors, stopping criteria, a new cache…). On this machine that
-overhead, not the GPU, dominated the time per frame.
+Each audio frame (12.5 per second) runs one talker step (a 28-layer decoder over one token) and then asks the code
+predictor for the 15 remaining codebooks through the generic Hugging Face `generate()`. On this machine both were
+limited by Python and kernel-launch overhead, not by the GPU (measured: 147 ms and 324 ms per frame for a budget of
+80 ms). Three levels, chosen by the plugin at load time:
 
-This module runs the same loop directly: same forwards, same cache, and the same sampling as `generate()`
-(temperature → top-k → top-p, then `torch.multinomial`; greedy when sampling is off). With the same random seed it
-draws the same tokens. Only `.sequences` is returned because that is all the talker reads from the result.
+- `fast_generate`: the predictor loop run directly — same forwards, same cache, same sampling as `generate()`
+  (temperature → top-k → top-p, then `torch.multinomial`); bit-identical output. ~1.2x.
+- `GraphedCodePredictor`: the 15 predictor steps replayed from CUDA graphs.
+- `GraphedTalkerDecoder`: the talker decoder replayed from one CUDA graph over a static KV cache.
+
+With graphs the logits match the original at bf16 precision (~0.4 % relative), not bit for bit. Measured with the
+user's voice: RTF ~7 → ~0.6 with the same WER, speaker similarity and duration statistics.
 """
 
 from __future__ import annotations
@@ -58,7 +62,7 @@ def fast_generate(predictor: Any, inputs_embeds: torch.Tensor, max_new_tokens: i
     cache = DynamicCache()
     length = inputs_embeds.shape[1]
     device = inputs_embeds.device
-    with torch.inference_mode():
+    with torch.no_grad():
         out = predictor(inputs_embeds=inputs_embeds, past_key_values=cache, use_cache=True,
                         cache_position=torch.arange(length, device=device))
         tokens = []
@@ -104,14 +108,16 @@ class GraphedCodePredictor:
         self.graphs: list[torch.cuda.CUDAGraph] = []
         self.logits: list[torch.Tensor] = []
 
+        # Every capture runs under `no_grad` (never `inference_mode`): CUDA's graph-safe RNG state is created by
+        # the first capture of the process, and mixing both modes makes a later capture fail half-way.
         side = torch.cuda.Stream(device=device)
         side.wait_stream(torch.cuda.current_stream(device))
-        with torch.cuda.stream(side), torch.inference_mode():
+        with torch.cuda.stream(side), torch.no_grad():
             for _ in range(3):  # warm-up: lazy cache allocation, cuBLAS workspaces
                 for s in range(num_steps):
                     self._step(s)
         torch.cuda.current_stream(device).wait_stream(side)
-        with torch.inference_mode():
+        with torch.no_grad():
             for s in range(num_steps):
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
@@ -140,7 +146,7 @@ class GraphedCodePredictor:
         top_p = config.top_p if top_p is None else top_p
         top_k = config.top_k if top_k is None else top_k
         temperature = config.temperature if temperature is None else temperature
-        with torch.inference_mode():
+        with torch.no_grad():
             self.embeds.copy_(inputs_embeds)
             tokens = []
             for s in range(self.steps):
@@ -185,7 +191,8 @@ class GraphedTalkerDecoder:
         self.slots = torch.arange(capacity, device=device)
 
         # Lazy StaticCache allocation + cuBLAS workspaces, then capture on a side stream. `no_grad`, not
-        # `inference_mode`: generate() later writes into this cache under no_grad, which inference tensors forbid.
+        # `inference_mode`: generate() later writes into this cache under no_grad (inference tensors forbid it), and
+        # all captures of the process must share one mode (see GraphedCodePredictor).
         side = torch.cuda.Stream(device=device)
         side.wait_stream(torch.cuda.current_stream(device))
         with torch.cuda.stream(side), torch.no_grad():
