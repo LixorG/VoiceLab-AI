@@ -126,3 +126,80 @@ def test_install_graphs_needs_a_cuda_model():
         talker=types.SimpleNamespace(code_predictor=predictor, config=types.SimpleNamespace(num_code_groups=5,
                                                                                             hidden_size=8))))
     assert fast_predictor.install_graphs(model) is False  # CPU weights (or no CUDA): no capture attempted
+
+
+class _FakeCache:
+    def __init__(self):
+        self.resets = 0
+
+    def reset(self):
+        self.resets += 1
+
+
+def _decoder(capacity=64, budget=10):
+    """A GraphedTalkerDecoder without CUDA capture: the routing logic only."""
+    decoder = fast_predictor.GraphedTalkerDecoder.__new__(fast_predictor.GraphedTalkerDecoder)
+    decoder.capacity, decoder.budget = capacity, budget
+    decoder.cache = _FakeCache()
+    decoder.slots = torch.arange(capacity)
+    decoder.embeds = torch.zeros(1, 1, 4)
+    decoder.position_ids = torch.zeros(3, 1, 1, dtype=torch.long)
+    decoder.cache_position = torch.zeros(1, dtype=torch.long)
+    decoder.calls = []
+
+    def original(**kwargs):
+        decoder.calls.append(kwargs)
+        return types.SimpleNamespace(past_key_values=kwargs["past_key_values"])
+
+    decoder.original = original
+    decoder.replays = 0
+
+    def replay():
+        decoder.replays += 1
+        decoder.out.last_hidden_state.add_(1)
+
+    decoder.graph = types.SimpleNamespace(replay=replay)
+    decoder.out = types.SimpleNamespace(last_hidden_state=torch.zeros(1, 1, 4),
+                                        hidden_states=(torch.zeros(1, 1, 4), torch.ones(1, 1, 4)))
+    return decoder
+
+
+def test_talker_prefill_uses_the_static_cache_only_when_it_fits():
+    d = _decoder(capacity=64, budget=10)
+    prompt = torch.randn(1, 20, 4)
+    d.forward(inputs_embeds=prompt, attention_mask=torch.ones(1, 20, dtype=torch.long), position_ids=None,
+              past_key_values="dynamic", use_cache=True, output_hidden_states=True, cache_position=torch.arange(20))
+    call = d.calls[-1]
+    assert call["past_key_values"] is d.cache and d.cache.resets == 1
+    assert call["attention_mask"].shape == (1, 1, 20, 64)  # causal over the whole static cache
+    assert bool(call["attention_mask"][0, 0, 3, 3]) and not bool(call["attention_mask"][0, 0, 3, 4])
+
+    for kwargs in ({"attention_mask": torch.tensor([[0] + [1] * 19])},  # left padding
+                   {"inputs_embeds": torch.randn(2, 20, 4)},  # batch of two
+                   {"inputs_embeds": torch.randn(1, 60, 4)}):  # 60 + budget 10 does not fit in 64
+        args = {"inputs_embeds": prompt, "attention_mask": torch.ones(1, 20, dtype=torch.long),
+                "past_key_values": "dynamic", "use_cache": True, "cache_position": torch.arange(20), **kwargs}
+        d.forward(**args)
+        assert d.calls[-1]["past_key_values"] == "dynamic"  # original path, untouched cache
+
+
+def test_talker_decode_replays_the_graph_and_clones_outputs():
+    d = _decoder()
+    step = {"inputs_embeds": torch.randn(1, 1, 4), "position_ids": torch.full((3, 1, 1), 21),
+            "past_key_values": d.cache, "use_cache": True, "output_hidden_states": True,
+            "cache_position": torch.tensor([21])}
+    first = d.forward(**step)
+    second = d.forward(**step)
+    assert d.replays == 2 and not d.calls  # no eager forward at all
+    assert int(d.cache_position) == 21 and torch.equal(d.position_ids, torch.full((3, 1, 1), 21))
+    assert first.last_hidden_state.sum() == 4 and second.last_hidden_state.sum() == 8  # clones, not shared buffers
+    assert first.hidden_states[1] is not d.out.hidden_states[1]
+
+    d.forward(**{**step, "past_key_values": "dynamic"})  # a request that started on the original path stays there
+    assert d.calls[-1]["past_key_values"] == "dynamic" and d.replays == 2
+
+
+def test_install_talker_graphs_needs_a_cuda_model():
+    talker = types.SimpleNamespace(model=torch.nn.Linear(2, 2), parameters=lambda: iter([torch.zeros(1)]))
+    assert fast_predictor.install_talker_graphs(types.SimpleNamespace(model=types.SimpleNamespace(talker=talker))) \
+        is False

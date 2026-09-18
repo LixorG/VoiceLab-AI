@@ -152,6 +152,91 @@ class GraphedCodePredictor:
         return types.SimpleNamespace(sequences=torch.stack(tokens, dim=1))
 
 
+class GraphedTalkerDecoder:
+    """The talker's 28-layer decoder, one token per audio frame, replayed from a single CUDA graph.
+
+    Hugging Face's `generate()` still drives the loop (sampling, repetition penalty, stopping, the code predictor);
+    only the inner decoder call is swapped:
+    - prefill (the variable-length prompt) runs eagerly, but writes into a pre-allocated `StaticCache`;
+    - every later 1-token step copies its inputs into static buffers and replays one graph captured at load time
+      (the causal mask over the static cache is computed inside the graph from the position).
+    Outputs are cloned after each replay because `generate()` keeps every step's hidden states.
+
+    A request uses the graph only if it is batch 1, unpadded and fits the cache (prompt + max_new_tokens);
+    otherwise the original path runs with its own dynamic cache.
+    """
+
+    def __init__(self, talker: Any, capacity: int = 2048) -> None:
+        from transformers.cache_utils import StaticCache
+
+        self.talker = talker
+        self.inner = talker.model
+        self.original = talker.model.forward
+        self.capacity = capacity
+        self.budget = 0  # max_new_tokens of the request in flight (set by the generate() wrapper)
+        param = next(self.inner.parameters())
+        device, dtype = param.device, param.dtype
+        hidden = talker.config.hidden_size
+        self.cache = StaticCache(config=talker.config, max_cache_len=capacity, max_batch_size=1, device=device,
+                                 dtype=dtype)
+        self.embeds = torch.zeros(1, 1, hidden, device=device, dtype=dtype)
+        self.position_ids = torch.zeros(3, 1, 1, dtype=torch.long, device=device)
+        self.cache_position = torch.zeros(1, dtype=torch.long, device=device)
+        self.slots = torch.arange(capacity, device=device)
+
+        # Lazy StaticCache allocation + cuBLAS workspaces, then capture on a side stream. `no_grad`, not
+        # `inference_mode`: generate() later writes into this cache under no_grad, which inference tensors forbid.
+        side = torch.cuda.Stream(device=device)
+        side.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(side), torch.no_grad():
+            for _ in range(3):
+                self._decode()
+        torch.cuda.current_stream(device).wait_stream(side)
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.no_grad(), torch.cuda.graph(self.graph):
+            self.out = self._decode()
+
+    def _decode(self) -> Any:
+        mask = (self.slots <= self.cache_position)[None, None, None, :]
+        return self.original(inputs_embeds=self.embeds, attention_mask=mask, position_ids=self.position_ids,
+                             past_key_values=self.cache, use_cache=True, output_hidden_states=True,
+                             cache_position=self.cache_position)
+
+    def _eligible_prefill(self, inputs_embeds: torch.Tensor, attention_mask: Any, use_cache: Any,
+                          output_attentions: Any) -> bool:
+        if inputs_embeds is None or inputs_embeds.shape[0] != 1 or not use_cache or output_attentions:
+            return False
+        if isinstance(attention_mask, torch.Tensor) and (attention_mask.ndim != 2 or not bool(attention_mask.all())):
+            return False
+        return inputs_embeds.shape[1] + self.budget + 1 <= self.capacity
+
+    def forward(self, input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
+                inputs_embeds=None, use_cache=None, output_attentions=None, output_hidden_states=None,
+                cache_position=None, **kwargs: Any) -> Any:
+        from transformers.modeling_outputs import BaseModelOutputWithPast
+
+        prefill = inputs_embeds is not None and inputs_embeds.shape[1] > 1
+        if prefill and self._eligible_prefill(inputs_embeds, attention_mask, use_cache, output_attentions):
+            positions = torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device)
+            mask = (self.slots[None, :] <= positions[:, None])[None, None]  # causal over the static cache
+            self.cache.reset()  # no stale keys from the previous request, whatever reads the cache
+            return self.original(input_ids=None, attention_mask=mask, position_ids=position_ids,
+                                 past_key_values=self.cache, inputs_embeds=inputs_embeds, use_cache=True,
+                                 output_hidden_states=output_hidden_states, cache_position=positions)
+        if prefill or past_key_values is not self.cache or inputs_embeds is None:
+            return self.original(input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids,
+                                 past_key_values=past_key_values, inputs_embeds=inputs_embeds, use_cache=use_cache,
+                                 output_attentions=output_attentions, output_hidden_states=output_hidden_states,
+                                 cache_position=cache_position, **kwargs)
+        self.embeds.copy_(inputs_embeds)
+        self.position_ids.copy_(position_ids)
+        self.cache_position.copy_(cache_position)
+        self.graph.replay()
+        hidden_states = tuple(h.clone() for h in self.out.hidden_states) if output_hidden_states else None
+        return BaseModelOutputWithPast(last_hidden_state=self.out.last_hidden_state.clone(),
+                                       past_key_values=self.cache, hidden_states=hidden_states)
+
+
 def _predictor_of(model: Any) -> Any:
     return getattr(getattr(getattr(model, "model", None), "talker", None), "code_predictor", None)
 
@@ -162,6 +247,29 @@ def install(model: Any) -> bool:
     if predictor is None or not hasattr(predictor, "generation_config"):
         return False
     predictor.generate = types.MethodType(fast_generate, predictor)
+    return True
+
+
+def install_talker_graphs(model: Any, capacity: int = 2048) -> bool:
+    """Replay the talker decoder from a CUDA graph. False (original decoder kept) if it cannot be captured."""
+    talker = getattr(getattr(model, "model", None), "talker", None)
+    if talker is None or not hasattr(talker, "model") or not torch.cuda.is_available():
+        return False
+    if next(talker.parameters()).device.type != "cuda":
+        return False
+    try:
+        decoder = GraphedTalkerDecoder(talker, capacity)
+    except Exception:  # noqa: BLE001  (a capture failure only means no acceleration)
+        return False
+    original_generate = talker.generate
+
+    def generate(*args: Any, **kwargs: Any) -> Any:
+        decoder.budget = int(kwargs.get("max_new_tokens") or talker.generation_config.max_new_tokens or capacity)
+        return original_generate(*args, **kwargs)
+
+    talker.model.forward = decoder.forward
+    talker.generate = generate
+    talker._voicelab_decoder_graph = decoder  # keep the graph, its buffers and the static cache alive
     return True
 
 
