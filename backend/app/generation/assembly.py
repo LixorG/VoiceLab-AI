@@ -43,6 +43,26 @@ def _fade_in(audio: np.ndarray, samples: int) -> np.ndarray:
     return out
 
 
+def timeline(parts: list[SegmentAudio], crossfade_ms: int = CROSSFADE_MS) -> list[tuple[float, float]]:
+    """(start_s, end_s) of every part inside the audio `assemble()` builds from the same parts (for subtitles)."""
+    if not parts:
+        return []
+    sr = parts[0].sample_rate
+    xfade = int(sr * crossfade_ms / 1000)
+    cursor = int(sr * parts[0].pause_before_ms / 1000)
+    spans = []
+    for i, part in enumerate(parts):
+        length = int(round(np.asarray(part.audio).size * sr / part.sample_rate))
+        prev_pause = parts[i - 1].pause_after_ms if i > 0 else part.pause_before_ms
+        if i > 0 and prev_pause == 0 and cursor >= xfade and length >= xfade and xfade > 0:
+            cursor -= xfade  # the crossfade overlaps the previous part
+        spans.append((cursor / sr, (cursor + length) / sr))
+        cursor += length
+        if part.pause_after_ms:
+            cursor += int(sr * part.pause_after_ms / 1000)
+    return spans
+
+
 def assemble(parts: list[SegmentAudio], crossfade_ms: int = CROSSFADE_MS) -> tuple[np.ndarray, int]:
     if not parts:
         return np.zeros(0, dtype=np.float32), 24_000

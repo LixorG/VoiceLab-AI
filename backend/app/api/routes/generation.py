@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from app.asr.manager import ASRManager, get_asr_manager
+from app.audio.export import FORMATS, ExportFormat, export_audio
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.engines.manager import ModelManager, get_model_manager
@@ -15,6 +16,7 @@ from app.evaluation.speaker import SpeakerModelStatus, get_speaker_encoder
 from app.postprocess.config import PostProcessCapabilities, PostProcessConfig
 from app.postprocess.processor import capabilities as postprocess_capabilities
 from app.schemas.experiment import RatingUpdate
+from app.schemas.export import ExportFormatInfo
 from app.schemas.generation import (
     BatchAccepted,
     BatchCreate,
@@ -77,6 +79,14 @@ def postprocess_caps(settings: Settings = Depends(get_settings)) -> PostProcessC
     return postprocess_capabilities(mastering.ffmpeg_or_none(settings))
 
 
+@router.get("/export/formats", response_model=list[ExportFormatInfo], summary="Formatos de descarga disponibles")
+def export_formats(service: GenerationService = Depends(get_generation_service)) -> list[ExportFormatInfo]:
+    has_ffmpeg = mastering.ffmpeg_or_none(service.settings) is not None
+    return [ExportFormatInfo(id=key, label=spec.label, available=key == "wav" or has_ffmpeg,
+                             reason=None if key == "wav" or has_ffmpeg else "Requiere FFmpeg.")
+            for key, spec in FORMATS.items()]
+
+
 @router.get("/evaluators", response_model=list[EvaluatorInfo],
             summary="Evaluaciones automáticas disponibles (estimaciones)")
 def evaluators(service: GenerationService = Depends(get_generation_service),
@@ -110,12 +120,16 @@ async def get_generation(generation_id: str,
 
 @router.get("/{generation_id}/audio", summary="Audio generado (final o salida original del modelo)")
 def audio(generation_id: str, download: bool = False, version: Literal["final", "raw"] = "final",
+          format: ExportFormat = "wav",  # noqa: A002
           service: GenerationService = Depends(get_generation_service)) -> FileResponse:
     gen = service.get(generation_id)
-    path = service.audio_path(gen, raw=version == "raw")
+    source = service.audio_path(gen, raw=version == "raw")
+    path = export_audio(source, format, service.settings.data_dir / "cache" / "exports",
+                        mastering.ffmpeg_or_none(service.settings))
+    spec = FORMATS[format]
     suffix = "_original" if version == "raw" and gen.postprocess else ""
-    filename = f"voicelab_{gen.engine}_{gen.created_at:%Y%m%d_%H%M%S}{suffix}.wav"
-    return FileResponse(path, media_type="audio/wav", filename=filename,
+    filename = f"voicelab_{gen.engine}_{gen.created_at:%Y%m%d_%H%M%S}{suffix}.{spec.extension}"
+    return FileResponse(path, media_type=spec.media_type, filename=filename,
                         content_disposition_type="attachment" if download else "inline")
 
 

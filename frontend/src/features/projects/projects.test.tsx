@@ -145,7 +145,8 @@ describe('ProjectsPage', () => {
     expect(screen.getByText(/cambiaron después de generar/)).toBeInTheDocument()
     expect(screen.getAllByTestId('player')).toHaveLength(2)
     expect(screen.getByText(/1\/3 listos/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Exportar WAV/ })).toBeDisabled()
+    expect(screen.getByText('Exportar audio').closest('[aria-disabled]')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('button', { name: /Exportar ZIP/ })).toBeDisabled()
 
     const text = within(rows[2]).getByLabelText('Texto del segmento 3')
     fireEvent.change(text, { target: { value: 'Texto nuevo.' } })
@@ -165,7 +166,10 @@ describe('ProjectsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Generar 2 pendientes' }))
     await waitFor(() => expect(lastBody('/api/projects/p1/generate', 'POST')).toEqual({ segment_ids: null, only_pending: true }))
-    await waitFor(() => expect(screen.getByRole('link', { name: /Exportar WAV/ })).toHaveAttribute('href', '/api/projects/p1/export?format=wav&download=true&allow_partial=false'))
+    await waitFor(() => expect(screen.getByRole('link', { name: 'WAV (sin pérdida)' })).toHaveAttribute('href', '/api/projects/p1/export?format=wav&download=true&allow_partial=false'))
+    expect(screen.getByRole('link', { name: 'MP3 (para vídeo y web)' })).toHaveAttribute('href', '/api/projects/p1/export?format=mp3&download=true&allow_partial=false')
+    expect(screen.getByRole('link', { name: /SRT/ })).toHaveAttribute('href', '/api/projects/p1/subtitles?format=srt&download=true')
+    expect(screen.getByRole('link', { name: /WebVTT/ })).toHaveAttribute('href', '/api/projects/p1/subtitles?format=vtt&download=true')
     expect(screen.getByRole('link', { name: /Exportar ZIP/ })).toHaveAttribute('href', '/api/projects/p1/export?format=zip&download=true&allow_partial=false')
 
     fireEvent.click(screen.getByRole('button', { name: 'Escuchar todo' }))

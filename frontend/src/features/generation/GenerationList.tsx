@@ -1,7 +1,8 @@
-import { AlertTriangle, Columns2, Download, Loader2, Repeat, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Columns2, Loader2, Repeat, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { AudioDownloadMenu } from '@/components/ui/download-menu'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -133,13 +134,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
         )}
         {ref && <span className="truncate">{tg.reference(ref.name ?? '', range)}</span>}
         <span className="ml-auto flex gap-0.5">
-          {gen.audio_url && (
-            <Button asChild size="icon" variant="ghost" className="size-7" title={tg.download}>
-              <a href={`${gen.audio_url}${gen.audio_url.includes('?') ? '&' : '?'}download=true`} aria-label={tg.download}>
-                <Download />
-              </a>
-            </Button>
-          )}
+          {gen.audio_url && <AudioDownloadMenu url={gen.audio_url} />}
           {!running && (
             <Tooltip>
               <TooltipTrigger asChild>

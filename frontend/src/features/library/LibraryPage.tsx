@@ -1,7 +1,8 @@
-import { Download, RotateCcw, Star, Trash2 } from 'lucide-react'
+import { RotateCcw, Star, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { AudioDownloadMenu } from '@/components/ui/download-menu'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AudioPlayer } from '@/features/audio/AudioPlayer'
@@ -188,11 +189,7 @@ function Row({ item }: { item: LibraryItem }) {
         >
           <Star className={item.favorite ? 'size-4 fill-[var(--primary)] text-[var(--primary)]' : 'size-4'} />
         </button>
-        {item.audio_url && (
-          <a href={`${item.audio_url}&download=true`} className="p-1 text-muted-foreground hover:text-foreground" aria-label={t.generation.download}>
-            <Download className="size-4" />
-          </a>
-        )}
+        {item.audio_url && <AudioDownloadMenu url={item.audio_url} />}
         <button type="button" aria-label={tl.reuse} className="p-1 text-muted-foreground hover:text-foreground" onClick={() => void reuse()}>
           <RotateCcw className="size-4" />
         </button>

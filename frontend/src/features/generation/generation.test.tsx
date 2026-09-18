@@ -160,7 +160,8 @@ describe('GenerationList', () => {
     expect(screen.getByRole('progressbar', { name: 'Generando (este modelo no informa del progreso)' })).not.toHaveAttribute('aria-valuenow')
     expect(screen.getAllByText('Generando voz…')).toHaveLength(2)
     expect(screen.getByRole('alert')).toHaveTextContent('memoria de GPU')
-    expect(screen.getByRole('link', { name: 'Descargar WAV' })).toHaveAttribute('href', '/api/generation/g1/audio?download=true')
+    expect(screen.getByRole('link', { name: 'WAV (sin pérdida)' })).toHaveAttribute('href', '/api/generation/g1/audio?download=true')
+    expect(screen.getByRole('link', { name: 'MP3 (para vídeo y web)' })).toHaveAttribute('href', '/api/generation/g1/audio?download=true&format=mp3')
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Cancelar' })[0])
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/jobs/g3/cancel', expect.objectContaining({ method: 'POST' })))

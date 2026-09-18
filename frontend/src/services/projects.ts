@@ -20,6 +20,7 @@ export const projectsApi = {
   reorder: (id: string, ids: string[]) => request<ProjectRead>(`/projects/${id}/segments/order`, { method: 'PUT', ...json({ ids }) }),
   generate: (id: string, segmentIds: string[] | null, onlyPending: boolean) =>
     request<ProjectRead>(`/projects/${id}/generate`, { method: 'POST', ...json({ segment_ids: segmentIds, only_pending: onlyPending }) }),
-  exportUrl: (id: string, format: 'wav' | 'zip', options: { download?: boolean; partial?: boolean; bust?: number } = {}) =>
+  subtitlesUrl: (id: string, format: 'srt' | 'vtt') => `/api/projects/${id}/subtitles?format=${format}&download=true`,
+  exportUrl: (id: string, format: 'wav' | 'mp3' | 'ogg' | 'flac' | 'zip', options: { download?: boolean; partial?: boolean; bust?: number } = {}) =>
     `/api/projects/${id}/export?format=${format}&download=${options.download ?? true}&allow_partial=${options.partial ?? false}${options.bust ? `&t=${options.bust}` : ''}`,
 }

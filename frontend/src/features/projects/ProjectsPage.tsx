@@ -1,7 +1,8 @@
-import { AlertTriangle, ArrowDown, ArrowUp, Clapperboard, Download, FileArchive, Headphones, Loader2, Plus, RefreshCw, Sparkles, Trash2, Wand2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Captions, Clapperboard, FileArchive, Headphones, Loader2, Plus, RefreshCw, Sparkles, Trash2, Wand2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { DownloadMenu, useExportFormats } from '@/components/ui/download-menu'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -355,6 +356,7 @@ function ProjectDetail() {
   const { detail: project, busy, error, rename, generate, remove, refresh, addSegment, clearError } = useProjectsStore()
   const [name, setName] = useState(project?.name ?? '')
   const [preview, setPreview] = useState<string | null>(null)
+  const formats = useExportFormats()
   const running = isProjectRunning(project)
 
   useEffect(() => {
@@ -432,23 +434,38 @@ function ProjectDetail() {
                   <Headphones />
                   {tp.listenAll}
                 </Button>
-                {(['wav', 'zip'] as const).map((format) => {
-                  const icon = format === 'wav' ? <Download /> : <FileArchive />
-                  const label = format === 'wav' ? tp.exportWav : tp.exportZip
-                  return canExport ? (
-                    <Button key={format} asChild size="sm" variant="outline">
-                      <a href={projectsApi.exportUrl(project.id, format)}>
-                        {icon}
-                        {label}
-                      </a>
-                    </Button>
-                  ) : (
-                    <Button key={format} size="sm" variant="outline" disabled title={tp.exportNeedsAll}>
-                      {icon}
-                      {label}
-                    </Button>
-                  )
-                })}
+                <DownloadMenu
+                  label={tp.exportAudio}
+                  disabled={!canExport}
+                  disabledTitle={tp.exportNeedsAll}
+                  items={formats.map((f) => ({
+                    key: f.id,
+                    label: f.label,
+                    href: projectsApi.exportUrl(project.id, f.id),
+                    disabled: !f.available,
+                    title: f.reason ?? undefined,
+                  }))}
+                />
+                <DownloadMenu
+                  label={tp.subtitles}
+                  icon={<Captions className="size-4" />}
+                  disabled={!canExport}
+                  disabledTitle={tp.exportNeedsAll}
+                  items={(['srt', 'vtt'] as const).map((f) => ({ key: f, label: tp.subtitleFormats[f], href: projectsApi.subtitlesUrl(project.id, f), title: tp.subtitlesHint }))}
+                />
+                {canExport ? (
+                  <Button asChild size="sm" variant="outline">
+                    <a href={projectsApi.exportUrl(project.id, 'zip')}>
+                      <FileArchive />
+                      {tp.exportZip}
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled title={tp.exportNeedsAll}>
+                    <FileArchive />
+                    {tp.exportZip}
+                  </Button>
+                )}
               </span>
             </div>
             {!canExport && ready > 0 && <p className="text-[11px] text-muted-foreground">{tp.exportNeedsAll}</p>}

@@ -54,6 +54,7 @@ class ErrorCode(StrEnum):
     PROJECT_NOT_READY = "PROJECT_NOT_READY"
     PRONUNCIATION_NOT_FOUND = "PRONUNCIATION_NOT_FOUND"
     CHECKPOINT_NOT_FOUND = "CHECKPOINT_NOT_FOUND"
+    EXPORT_ERROR = "EXPORT_ERROR"
     EVALUATION_UNAVAILABLE = "EVALUATION_UNAVAILABLE"
     JOB_NOT_FOUND = "JOB_NOT_FOUND"
     JOB_CANCELLED = "JOB_CANCELLED"
@@ -91,6 +92,7 @@ MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.EXPERIMENT_NOT_FOUND: "El experimento solicitado no existe.",
     ErrorCode.PROJECT_NOT_FOUND: "El proyecto solicitado no existe.",
     ErrorCode.PROJECT_NOT_READY: "Faltan segmentos por generar (o su audio está desactualizado) para exportar el proyecto.",
+    ErrorCode.EXPORT_ERROR: "No se pudo exportar el audio en ese formato.",
     ErrorCode.CHECKPOINT_NOT_FOUND: "El checkpoint personalizado solicitado no existe.",
     ErrorCode.PRONUNCIATION_NOT_FOUND: "La entrada del diccionario de pronunciación no existe.",
     ErrorCode.JOB_INTERRUPTED: "La tarea se interrumpió porque el servidor se cerró o se reinició. Vuelve a lanzarla.",

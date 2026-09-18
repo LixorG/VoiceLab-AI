@@ -290,6 +290,9 @@ export const es = {
     confirmDelete: (n: number) => (n === 1 ? '¿Eliminar esta generación y su audio?' : `¿Eliminar ${n} generaciones y sus audios?`),
     deleteFailed: (n: number) => (n === 1 ? 'No se pudo eliminar 1 generación.' : `No se pudieron eliminar ${n} generaciones.`),
   },
+  download: {
+    formats: { wav: 'WAV (sin pérdida)', mp3: 'MP3 (para vídeo y web)', ogg: 'OGG Opus (web y apps)', flac: 'FLAC (sin pérdida, comprimido)' },
+  },
   recorder: {
     open: 'Grabar con el micrófono',
     title: 'Grabar una referencia',
@@ -591,6 +594,10 @@ export const es = {
     running: 'Generando…',
     listenAll: 'Escuchar todo',
     exportWav: 'Exportar WAV',
+    exportAudio: 'Exportar audio',
+    subtitles: 'Subtítulos',
+    subtitleFormats: { srt: 'SRT (editores de vídeo, YouTube)', vtt: 'WebVTT (web)' },
+    subtitlesHint: 'Tiempos sacados del audio real de cada segmento; dentro de un segmento largo se reparten por frases (estimación).',
     exportZip: 'Exportar ZIP',
     exportNeedsAll: 'Para exportar, todos los segmentos deben estar generados y actualizados.',
     previewAll: 'Audio completo, con las pausas entre segmentos.',

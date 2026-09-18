@@ -22,7 +22,7 @@ import soundfile as sf
 from sqlmodel import Session, select
 
 from app.core.errors import AppError, ErrorCode
-from app.generation.assembly import SegmentAudio, assemble
+from app.generation.assembly import SegmentAudio, assemble, timeline
 from app.generation.planner import split_long_text
 from app.models.entities import Generation, Project, ProjectSegment
 from app.models.enums import JobStatus
@@ -313,16 +313,38 @@ class ProjectService:
                            message="No hay ningún segmento generado para exportar.")
         return parts
 
-    def render(self, project_id: str, allow_partial: bool = False) -> tuple[Path, list[tuple[ProjectSegment, Path]]]:
-        project = self.get(project_id)
-        cfg = self.project_settings(project)
-        parts = self._ready_parts(project, allow_partial)
+    @staticmethod
+    def _segment_audio(cfg: ProjectSettings, parts: list[tuple[ProjectSegment, Path]]) -> list[SegmentAudio]:
         audio_parts = []
         for i, (seg, path) in enumerate(parts):
             data, sr = sf.read(path, dtype="float32", always_2d=False)
             last = i == len(parts) - 1
             pause = 0 if last else (seg.pause_after_ms if seg.pause_after_ms is not None else cfg.default_pause_ms)
             audio_parts.append(SegmentAudio(np.asarray(data).reshape(-1), sr, 0, pause))
+        return audio_parts
+
+    def subtitles(self, project_id: str, fmt: str, allow_partial: bool = False) -> str:
+        """SRT/VTT timed like the exported WAV (same parts, pauses and crossfades)."""
+        from app.generation.subtitles import build_cues, spoken_text, to_srt, to_vtt
+
+        project = self.get(project_id)
+        cfg = self.project_settings(project)
+        post = cfg.export_postprocess
+        if post and (post.trim_silence.enabled or post.time_stretch.enabled):
+            raise AppError(ErrorCode.EXPORT_ERROR, status_code=409,
+                           message="La masterización del proyecto recorta silencios o cambia la velocidad, así que "
+                                   "los subtítulos no coincidirían con el audio. Desactiva esas opciones para "
+                                   "exportarlos.")
+        parts = self._ready_parts(project, allow_partial)
+        spans = timeline(self._segment_audio(cfg, parts))
+        cues = build_cues(spans, [spoken_text(seg.text, cfg.markup) for seg, _ in parts])
+        return to_vtt(cues) if fmt == "vtt" else to_srt(cues)
+
+    def render(self, project_id: str, allow_partial: bool = False) -> tuple[Path, list[tuple[ProjectSegment, Path]]]:
+        project = self.get(project_id)
+        cfg = self.project_settings(project)
+        parts = self._ready_parts(project, allow_partial)
+        audio_parts = self._segment_audio(cfg, parts)
         audio, sr = assemble(audio_parts)
         if cfg.export_postprocess and cfg.export_postprocess.dsp_active:
             audio, _report = process(audio, sr, cfg.export_postprocess, mastering.ffmpeg_or_none(self.settings))
@@ -361,6 +383,12 @@ class ProjectService:
                     "duration_s": gen.duration_s if gen else None,
                 })
             archive.writestr("project.json", json.dumps(manifest, ensure_ascii=False, indent=2, default=str))
+            try:
+                for fmt in ("srt", "vtt"):
+                    captions = self.subtitles(project_id, fmt, allow_partial)
+                    archive.writestr(f"{_safe_name(project.name)}.{fmt}", captions)
+            except AppError:
+                pass  # timing-changing mastering: the ZIP still ships audio + manifest
         return buffer.getvalue()
 
     # ------------------------------------------------------------------ read models

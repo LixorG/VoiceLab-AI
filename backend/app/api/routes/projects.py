@@ -8,6 +8,7 @@ from sqlmodel import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.api.routes.generation import get_generation_service
+from app.audio.export import FORMATS, export_audio
 from app.core.database import get_session
 from app.schemas.project import (
     ProjectCreate,
@@ -20,6 +21,7 @@ from app.schemas.project import (
     SegmentsAdd,
     SegmentUpdate,
 )
+from app.services import mastering
 from app.services.generation_service import GenerationService
 from app.services.project_service import ProjectService
 
@@ -95,8 +97,22 @@ async def generate(project_id: str, body: ProjectGenerate,
     return await service.to_read(await service.generate(project_id, body))
 
 
-@router.get("/{project_id}/export", summary="Exportar el audio completo (WAV) o un ZIP con segmentos y manifiesto")
-async def export(project_id: str, format: str = Query(default="wav", pattern="^(wav|zip)$"),  # noqa: A002
+@router.get("/{project_id}/subtitles", summary="Subtítulos SRT o WebVTT sincronizados con el audio exportado")
+async def subtitles(project_id: str, format: str = Query(default="srt", pattern="^(srt|vtt)$"),  # noqa: A002
+                    allow_partial: bool = False, download: bool = True,
+                    service: ProjectService = Depends(get_project_service)) -> Response:
+    text = await run_in_threadpool(service.subtitles, project_id, format, allow_partial)
+    name = service.export_filename(project_id, format)
+    ascii_name = name.encode("ascii", "replace").decode().replace("?", "_")
+    disposition = "attachment" if download else "inline"
+    header = f"{disposition}; filename=\"{ascii_name}\"; filename*=utf-8''{quote(name)}"
+    media = "text/vtt" if format == "vtt" else "application/x-subrip"
+    return Response(content=text.encode("utf-8"), media_type=f"{media}; charset=utf-8",
+                    headers={"Content-Disposition": header})
+
+
+@router.get("/{project_id}/export", summary="Exportar el audio completo (WAV/MP3/OGG/FLAC) o un ZIP con todo")
+async def export(project_id: str, format: str = Query(default="wav", pattern="^(wav|mp3|ogg|flac|zip)$"),  # noqa: A002
                  allow_partial: bool = False, download: bool = True,
                  service: ProjectService = Depends(get_project_service)) -> Response:
     disposition = "attachment" if download else "inline"
@@ -106,6 +122,10 @@ async def export(project_id: str, format: str = Query(default="wav", pattern="^(
         ascii_name = name.encode("ascii", "replace").decode().replace("?", "_")
         header = f"{disposition}; filename=\"{ascii_name}\"; filename*=utf-8''{quote(name)}"
         return Response(content=data, media_type="application/zip", headers={"Content-Disposition": header})
-    path, _ = await run_in_threadpool(service.render, project_id, allow_partial)
-    return FileResponse(path, media_type="audio/wav", filename=service.export_filename(project_id, "wav"),
+    wav, _ = await run_in_threadpool(service.render, project_id, allow_partial)
+    settings = service.generations.settings
+    path = await run_in_threadpool(export_audio, wav, format, settings.data_dir / "cache" / "exports",
+                                   mastering.ffmpeg_or_none(settings))
+    spec = FORMATS[format]
+    return FileResponse(path, media_type=spec.media_type, filename=service.export_filename(project_id, spec.extension),
                         content_disposition_type=disposition)
