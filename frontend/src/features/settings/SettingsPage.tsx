@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PronunciationCard } from '@/features/settings/PronunciationCard'
+import { SpeakerModelCard } from '@/features/settings/SpeakerModelCard'
 import { MemoryCard, StorageCard } from '@/features/settings/ResourcesPanel'
 import { t } from '@/i18n/es'
 import { formatMegabytes } from '@/lib/utils'
@@ -75,7 +76,10 @@ export function SettingsPage() {
           <StorageCard />
         </div>
 
-        <PronunciationCard />
+        <div className="grid gap-5 lg:grid-cols-2 [&>*]:min-w-0">
+          <PronunciationCard />
+          <SpeakerModelCard />
+        </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
           <Card>

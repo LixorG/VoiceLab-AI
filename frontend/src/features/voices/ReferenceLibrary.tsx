@@ -1,8 +1,10 @@
-import { AlertTriangle, Loader2, Upload, X } from 'lucide-react'
+import { AlertTriangle, Loader2, Mic, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Recorder } from '@/features/voices/Recorder'
 import { ReferenceCard } from '@/features/voices/ReferenceCard'
 import { t } from '@/i18n/es'
 import { cn, formatBytes, formatDuration } from '@/lib/utils'
@@ -17,6 +19,7 @@ export function ReferenceLibrary() {
     useReferencesStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [recording, setRecording] = useState(false)
   const dragDepth = useRef(0)
 
   useEffect(() => {
@@ -113,6 +116,15 @@ export function ReferenceLibrary() {
             }}
           />
         </div>
+
+        {recording ? (
+          <Recorder onClose={() => setRecording(false)} />
+        ) : (
+          <Button size="sm" variant="outline" className="w-full" onClick={() => setRecording(true)}>
+            <Mic />
+            {t.recorder.open}
+          </Button>
+        )}
 
         {(notice || error) && (
           <div
