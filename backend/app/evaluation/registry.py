@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.asr.manager import ASRManager
 from app.evaluation.base import EvaluationInput, EvaluationOutput, Evaluator, EvaluatorInfo
 from app.evaluation.intelligibility import IntelligibilityEvaluator
+from app.evaluation.speaker import SpeakerSimilarityEvaluator, get_speaker_encoder
 
 
 class PlannedEvaluator:
@@ -22,10 +23,7 @@ class PlannedEvaluator:
 def build_evaluators(asr: ASRManager) -> list[Evaluator]:
     return [
         IntelligibilityEvaluator(asr),
-        PlannedEvaluator(
-            "speaker_similarity", "Similitud de hablante",
-            "Compararía el embedding de voz del resultado con el de la referencia (estimación automática).",
-            "Requiere un modelo de embeddings de hablante (p. ej. ECAPA-TDNN o WavLM-SV) que no está instalado."),
+        SpeakerSimilarityEvaluator(get_speaker_encoder()),
         PlannedEvaluator(
             "naturalness", "Naturalidad (MOS estimado)",
             "Predicción automática de la puntuación de oyentes; no sustituye una escucha real.",

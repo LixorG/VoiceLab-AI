@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from app.asr.languages import LANGUAGES
 from app.asr.manager import ASRManager
+from app.audio.storage import AudioStorage
 from app.core.errors import AppError, ErrorCode
 from app.evaluation.base import EvaluationInput, EvaluatorInfo
 from app.evaluation.registry import build_evaluators
@@ -61,6 +62,21 @@ class EvaluationService:
         self.generations = generations
         self.evaluators = build_evaluators(asr)
 
+    def _reference_audio(self, gen: Generation) -> tuple[np.ndarray | None, int | None]:
+        """The reference range the engine cloned from (processed 24 kHz WAV), or (None, None) if there was none."""
+        snap = gen.reference_snapshot or {}
+        sha = snap.get("sha256")
+        if not sha:
+            return None, None
+        path = AudioStorage(self.generations.settings.data_dir).processed_path(sha)
+        if not path.exists():
+            return None, None
+        info = sf.info(path)
+        start = int((snap.get("start_s") or 0) * info.samplerate)
+        stop = int(snap["end_s"] * info.samplerate) if snap.get("end_s") is not None else None
+        audio, sr = sf.read(path, start=start, stop=stop, dtype="float32", always_2d=False)
+        return np.asarray(audio).reshape(-1), sr
+
     def available(self) -> list[EvaluatorInfo]:
         return [e.info() for e in self.evaluators]
 
@@ -75,8 +91,10 @@ class EvaluationService:
                            details={i.id: i.reason for i in infos})
         audio, sr = sf.read(self.generations.audio_path(gen), dtype="float32", always_2d=False)
         language, language_source = target_language(self.session, gen)
+        ref_audio, ref_sr = self._reference_audio(gen)
         data = EvaluationInput(audio=np.asarray(audio).reshape(-1), sample_rate=sr, language=language,
-                               target_text=target_text(gen, self.generations.segments_of(gen.id)))
+                               target_text=target_text(gen, self.generations.segments_of(gen.id)),
+                               reference_audio=ref_audio, reference_sample_rate=ref_sr)
         metrics, details = [], {}
         for evaluator in runnable:
             out = evaluator.evaluate(data)

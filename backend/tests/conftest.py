@@ -29,3 +29,13 @@ def app(settings):
 def client(app) -> Iterator[TestClient]:
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _no_real_speaker_model(monkeypatch):
+    """Keep the suite hermetic: a real WavLM download on this machine must not be picked up by the tests."""
+    from app.evaluation.speaker import SpeakerEncoder, get_speaker_encoder
+
+    monkeypatch.setattr(SpeakerEncoder, "model_installed", lambda self: False)
+    yield
+    get_speaker_encoder().unload()

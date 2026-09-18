@@ -11,6 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.engines.manager import ModelManager, get_model_manager
 from app.evaluation.base import EvaluatorInfo
+from app.evaluation.speaker import SpeakerModelStatus, get_speaker_encoder
 from app.postprocess.config import PostProcessCapabilities, PostProcessConfig
 from app.postprocess.processor import capabilities as postprocess_capabilities
 from app.schemas.experiment import RatingUpdate
@@ -81,6 +82,18 @@ def postprocess_caps(settings: Settings = Depends(get_settings)) -> PostProcessC
 def evaluators(service: GenerationService = Depends(get_generation_service),
                asr: ASRManager = Depends(get_asr_manager)) -> list[EvaluatorInfo]:
     return EvaluationService(service.session, service, asr).available()
+
+
+@router.get("/evaluators/speaker-model", response_model=SpeakerModelStatus,
+            summary="Estado del modelo de similitud de voz")
+def speaker_model_status() -> SpeakerModelStatus:
+    return get_speaker_encoder().status()
+
+
+@router.post("/evaluators/speaker-model/download", response_model=SpeakerModelStatus, status_code=202,
+             summary="Descargar el modelo de similitud de voz (~405 MB)")
+def speaker_model_download() -> SpeakerModelStatus:
+    return get_speaker_encoder().start_download()
 
 
 @router.get("", response_model=list[GenerationRead], summary="Generaciones recientes")

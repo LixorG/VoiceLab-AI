@@ -37,6 +37,8 @@ class EvaluationInput:
     sample_rate: int
     target_text: str
     language: str | None = None
+    reference_audio: np.ndarray | None = None  # the exact clip the engine cloned from
+    reference_sample_rate: int | None = None
 
 
 class EvaluationOutput(BaseModel):
