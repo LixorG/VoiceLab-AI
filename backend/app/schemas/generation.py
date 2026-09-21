@@ -124,7 +124,8 @@ class GenerationRead(BaseModel):
     seed: int | None
     status: JobStatus
     progress: float
-    progress_available: bool = True
+    progress_available: bool
+    stream_chunks: int = 0  # live-preview chunks ready: /api/generation/{id}/stream/{n} = True
     message: str | None
     error_code: str | None
     reference: GenerationReference | None

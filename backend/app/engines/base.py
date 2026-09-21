@@ -183,6 +183,8 @@ class EngineResult(BaseModel):
 
 
 ProgressCallback = Callable[[float, str | None], None]
+#: Live preview: an engine with `supports_streaming` may call it with audio (float32 mono, sample rate) as it goes.
+AudioCallback = Callable[[np.ndarray, int], None]
 
 
 class CancelToken:
@@ -312,7 +314,8 @@ class TTSBackend(ABC):
     def prepare_reference(self, reference: ReferenceInput, variant: str) -> PreparedReference:
         raise self._not_implemented()
 
-    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken) -> EngineResult:
+    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken,
+                 on_audio: AudioCallback | None = None) -> EngineResult:
         raise self._not_implemented()
 
 

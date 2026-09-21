@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { GenerationList } from '@/features/generation/GenerationList'
 import { MarkupToolbar, PlanPreview } from '@/features/generation/MarkupTools'
+import { ParamsClipboardBar } from '@/features/generation/ParamsClipboard'
 import { BatchPanel, QueuePanel } from '@/features/generation/QueuePanel'
 import { generationBlockers } from '@/features/generation/readiness'
 import { EngineSettingsPanel } from '@/features/models/EngineSettingsPanel'
@@ -92,6 +93,7 @@ export function GeneratePage() {
       <aside className="flex w-full shrink-0 flex-col border-t bg-panel xl:w-80 xl:border-t-0 xl:border-l">
         <div className="flex-1 space-y-4 p-5 xl:overflow-y-auto">
           <QueuePanel />
+          <ParamsClipboardBar />
           <EngineSettingsPanel />
           <PostProcessPanel />
         </div>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { CopyParamsButton } from '@/features/generation/ParamsClipboard'
 import { t } from '@/i18n/es'
 import { cn, formatDuration } from '@/lib/utils'
 import { evaluationApi } from '@/services/experiments'
@@ -162,6 +163,9 @@ export function ComparisonTable({ generations, onUpdate }: { generations: Genera
             )}
           </Row>
           <Row label={tc.duration}>{generations.map((g) => cell(<span className="font-mono">{g.duration_s != null ? formatDuration(g.duration_s) : '—'}</span>, g.id))}</Row>
+          <Row label={t.paramsClipboard.row}>
+            {generations.map((g) => cell(<CopyParamsButton gen={g} label={g.label ?? g.variant ?? g.engine} />, g.id))}
+          </Row>
           <Row label={tc.seed}>{generations.map((g) => cell(<span className="font-mono">{g.seed ?? '—'}</span>, g.id))}</Row>
           <Row label={tc.rtf} hint={t.generation.rtfHint}>
             {generations.map((g) => cell(<span className="font-mono">{g.metrics?.rtf != null ? g.metrics.rtf.toFixed(2) : '—'}</span>, g.id))}

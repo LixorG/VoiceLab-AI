@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from fastapi.responses import FileResponse
 from sqlmodel import Session
 
@@ -10,9 +10,11 @@ from app.asr.manager import ASRManager, get_asr_manager
 from app.audio.export import FORMATS, ExportFormat, export_audio
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
+from app.core.errors import AppError, ErrorCode
 from app.engines.manager import ModelManager, get_model_manager
 from app.evaluation.base import EvaluatorInfo
 from app.evaluation.speaker import SpeakerModelStatus, get_speaker_encoder
+from app.generation.streaming import chunk_path
 from app.postprocess.config import PostProcessCapabilities, PostProcessConfig
 from app.postprocess.processor import capabilities as postprocess_capabilities
 from app.schemas.experiment import RatingUpdate
@@ -131,6 +133,16 @@ def audio(generation_id: str, download: bool = False, version: Literal["final", 
     filename = f"voicelab_{gen.engine}_{gen.created_at:%Y%m%d_%H%M%S}{suffix}.{spec.extension}"
     return FileResponse(path, media_type=spec.media_type, filename=filename,
                         content_disposition_type="attachment" if download else "inline")
+
+
+@router.get("/{generation_id}/stream/{index}", summary="Trozo de audio de la vista previa en directo")
+def stream_chunk(generation_id: str, index: int = Path(ge=0, le=9999),
+                 service: GenerationService = Depends(get_generation_service)) -> FileResponse:
+    gen = service.get(generation_id)
+    path = chunk_path(mastering.generation_dir(service.settings, gen.id), index)
+    if not path.exists():
+        raise AppError(ErrorCode.NOT_FOUND, status_code=404, message="Ese trozo de audio todavía no existe.")
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/{generation_id}/postprocess", response_model=GenerationRead,

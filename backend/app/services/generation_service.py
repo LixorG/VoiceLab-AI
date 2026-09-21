@@ -7,6 +7,7 @@ call; texts with pauses, emotions or styles are generated segment by segment and
 
 from __future__ import annotations
 
+import inspect
 import logging
 import random
 import re
@@ -30,6 +31,7 @@ from app.engines.manager import ModelManager, get_model_manager
 from app.generation.assembly import SegmentAudio, assemble
 from app.generation.markup import MarkupError, ParsedMarkup, Style, TextRun, parse
 from app.generation.planner import GenerationPlan, PlanError, plan_generation
+from app.generation.streaming import StreamWriter, silence
 from app.models.entities import Generation, GenerationSegment, ReferenceAudio, Transcript
 from app.models.enums import JobStatus, ReferenceStatus
 from app.postprocess.config import PostProcessConfig
@@ -481,9 +483,10 @@ class GenerationService:
     async def to_read(self, gen: Generation) -> GenerationRead:
         progress, message = (1.0 if gen.status == JobStatus.COMPLETED else 0.0), None
         status = gen.status
+        chunks = 0
         try:
             state = await self.queue.get(gen.id)
-            status, progress, message = state.status, state.progress, state.message
+            status, progress, message, chunks = state.status, state.progress, state.message, state.chunks
         except AppError:  # job no longer in memory (e.g. after restart): DB state is authoritative
             if gen.error_code and gen.status.is_terminal:
                 from app.core.errors import MESSAGES
@@ -503,7 +506,7 @@ class GenerationService:
         return GenerationRead(
             id=gen.id, kind=gen.kind, engine=gen.engine, variant=gen.variant, text=gen.text, params=gen.params,
             seed=gen.seed, status=status, progress=progress, progress_available=progress_available,
-            message=message, error_code=gen.error_code,
+            stream_chunks=chunks, message=message, error_code=gen.error_code,
             reference=GenerationReference(reference_id=snap["reference_id"], name=snap.get("name"),
                                           start_s=snap.get("start_s"), end_s=snap.get("end_s"), text=snap["text"])
             if snap else None,
@@ -544,6 +547,16 @@ def _reference_input(storage: AudioStorage, snap: dict) -> ReferenceInput:
                           start_s=snap.get("start_s"), end_s=snap.get("end_s"))
 
 
+def _accepts_live_audio(engine: Any, variant: str | None) -> bool:
+    """Only engines that declare streaming and whose generate() takes `on_audio` (plugins may predate it)."""
+    try:
+        if not engine.capabilities(variant).supports_streaming:
+            return False
+    except AppError:
+        return False
+    return "on_audio" in inspect.signature(engine.generate).parameters
+
+
 def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
     settings = get_settings()
     models = get_model_manager()
@@ -579,6 +592,14 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                                                                                     gen.variant or "")
                 return prepared_cache[snap["reference_id"]]
 
+            stream = StreamWriter(mastering.generation_dir(settings, gen.id), ctx.chunk_ready)
+            engine_streams = _accepts_live_audio(engine, gen.variant)
+
+            def generate(request: EngineRequest, progress: Any) -> Any:
+                extra = {"on_audio": stream.write} if engine_streams else {}
+                return models.run_with_memory_retry(partial(engine.generate, request, progress=progress,
+                                                            cancel=ctx.cancel, **extra))
+
             phase(JobStatus.PROCESSING_AUDIO, 0.1)
             gen_started = time.perf_counter()
             warnings = list(gen.warnings or [])
@@ -589,11 +610,8 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                 phase(JobStatus.GENERATING, 0.15)
                 request = EngineRequest(variant=gen.variant or "", text=gen.text, params=gen.params or {},
                                         reference=reference)
-                result = models.run_with_memory_retry(partial(
-                    engine.generate, request,
-                    progress=lambda p, msg: ctx.update(JobStatus.GENERATING, 0.15 + 0.8 * max(0.0, min(1.0, p)), msg),
-                    cancel=ctx.cancel,
-                ))
+                result = generate(request, lambda p, msg: ctx.update(
+                    JobStatus.GENERATING, 0.15 + 0.8 * max(0.0, min(1.0, p)), msg))
                 audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
                 sample_rate, seed = result.sample_rate, result.seed
                 gen.params = {**(gen.params or {}), **result.effective_params}
@@ -607,13 +625,9 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                     reference = prepared(seg.reference_snapshot)
                     request = EngineRequest(variant=gen.variant or "", text=seg.text, params=seg.params or {},
                                             reference=reference)
-                    result = models.run_with_memory_retry(partial(
-                        engine.generate, request,
-                        progress=lambda p, msg, i=i: ctx.update(
-                            JobStatus.GENERATING, 0.15 + 0.8 * (i + max(0.0, min(1.0, p))) / n,
-                            f"Segmento {i + 1} de {n}" + (f": {msg}" if msg else "…")),
-                        cancel=ctx.cancel,
-                    ))
+                    result = generate(request, lambda p, msg, i=i: ctx.update(
+                        JobStatus.GENERATING, 0.15 + 0.8 * (i + max(0.0, min(1.0, p))) / n,
+                        f"Segmento {i + 1} de {n}" + (f": {msg}" if msg else "…")))
                     seg_audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
                     seg.seed = result.seed
                     seg.params = {**(seg.params or {}), **result.effective_params}
@@ -623,6 +637,10 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                     warnings += [w for w in result.warnings if w not in warnings]
                     details.update(result.details)
                     parts.append(SegmentAudio(seg_audio, result.sample_rate, seg.pause_before_ms, seg.pause_after_ms))
+                    # live preview: a non-streaming engine shows each finished segment; a streaming one already
+                    # sent its audio, so only the pause that follows is added
+                    pause = silence(seg.pause_after_ms if i < n - 1 else 0, result.sample_rate)
+                    stream.write(pause if engine_streams else np.concatenate([seg_audio, pause]), result.sample_rate)
                 session.commit()
                 audio, sample_rate = assemble(parts)
                 seed = gen.seed

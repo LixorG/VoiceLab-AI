@@ -24,6 +24,7 @@ import numpy as np
 
 from app.core.errors import AppError, ErrorCode
 from app.engines.base import (
+    AudioCallback,
     CancelToken,
     ControlCapability,
     ControlSource,
@@ -43,6 +44,7 @@ from app.engines.base import (
     random_seed,
 )
 from app.engines.common import hf_files_cached, prepare_hf_cache, reference_clip
+from app.engines.qwen3tts.streaming import CodeStreamer, decoder_of
 
 logger = logging.getLogger("voicelab.engines.qwen3")
 
@@ -460,7 +462,8 @@ class Qwen3TTSBackend(TTSBackend):
                 self._prompts.popitem(last=False)
         return items
 
-    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken) -> EngineResult:
+    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken,
+                 on_audio: AudioCallback | None = None) -> EngineResult:
         if self._model is None or self._variant != request.variant:
             raise AppError(ErrorCode.MODEL_LOAD_ERROR, status_code=500, message="El modelo no está cargado.")
         v = self.variant(request.variant)
@@ -478,8 +481,8 @@ class Qwen3TTSBackend(TTSBackend):
         sampling["max_new_tokens"] = limit
         warnings: list[str] = []
 
-        def run(fn, **kwargs):  # noqa: ANN001, ANN202
-            with self._step_hook(expected, progress, cancel):
+        def run(fn, prefix=None, **kwargs):  # noqa: ANN001, ANN202
+            with self._step_hook(expected, progress, cancel), self._stream_hook(on_audio, prefix):
                 return fn(**kwargs, **sampling)
 
         if v.mode == "clone":
@@ -489,8 +492,10 @@ class Qwen3TTSBackend(TTSBackend):
             prompt = self._voice_clone_prompt(request.reference, params["clone_mode"])
             if cancel.cancelled:
                 raise AppError(ErrorCode.JOB_CANCELLED, status_code=409)
-            wavs, sr = run(self._model.generate_voice_clone, text=request.text, language=params["language"],
-                           voice_clone_prompt=prompt)
+            item = prompt[0] if prompt else None
+            prefix = getattr(item, "ref_code", None) if getattr(item, "icl_mode", False) else None
+            wavs, sr = run(self._model.generate_voice_clone, prefix=prefix, text=request.text,
+                           language=params["language"], voice_clone_prompt=prompt)
         elif v.mode == "custom_voice":
             wavs, sr = run(self._model.generate_custom_voice, text=request.text, speaker=params["speaker"],
                            language=params["language"], instruct=params["instruct"] or None)
@@ -533,6 +538,31 @@ class Qwen3TTSBackend(TTSBackend):
             yield
         except _Stop as exc:
             raise AppError(ErrorCode.JOB_CANCELLED, status_code=409) from exc
+        finally:
+            handle.remove()
+
+    @contextmanager
+    def _stream_hook(self, on_audio: AudioCallback | None, prefix: Any):  # noqa: ANN202
+        """Live audio: decode the codec frames of each talker step in small chunks (see streaming.py)."""
+        talker = getattr(getattr(self._model, "model", None), "talker", None)
+        decoder = decoder_of(self._model) if on_audio is not None else None
+        if on_audio is None or decoder is None or talker is None or not hasattr(talker, "register_forward_hook"):
+            yield
+            return
+        decode, samples_per_frame, rate = decoder
+        streamer = CodeStreamer(decode, on_audio, prefix=prefix, samples_per_frame=samples_per_frame,
+                                sample_rate=rate)
+
+        def hook(_module, _args, output):  # noqa: ANN001, ANN202
+            hidden = getattr(output, "hidden_states", None)
+            codes = hidden[1] if isinstance(hidden, tuple) and len(hidden) > 1 else None
+            if codes is not None and codes.shape[0] == 1:
+                streamer.add(codes[0])
+
+        handle = talker.register_forward_hook(hook)
+        try:
+            yield
+            streamer.flush()
         finally:
             handle.remove()
 

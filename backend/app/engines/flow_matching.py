@@ -16,6 +16,7 @@ import numpy as np
 
 from app.core.errors import AppError, ErrorCode
 from app.engines.base import (
+    AudioCallback,
     CancelToken,
     ControlCapability,
     ControlSource,
@@ -307,7 +308,8 @@ class FlowMatchingBackend(TTSBackend):
         return PreparedReference(engine=self.id, variant=variant, cache_key=key,
                                  payload={"audio_path": str(clip), "text": reference.text.strip()})
 
-    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken) -> EngineResult:
+    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken,
+                 on_audio: AudioCallback | None = None) -> EngineResult:
         if self._model is None or self._variant != request.variant:
             raise AppError(ErrorCode.MODEL_LOAD_ERROR, status_code=500, message="El modelo no está cargado.")
         if request.reference is None:

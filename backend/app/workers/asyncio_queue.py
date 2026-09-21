@@ -36,6 +36,10 @@ class JobContext:
                message: str | None = None) -> None:
         self._queue._threadsafe_update(self.job_id, status, progress, message)
 
+    def chunk_ready(self, count: int) -> None:
+        """A live-preview chunk was written: publish the new count to the progress stream."""
+        self._queue._threadsafe_chunks(self.job_id, count)
+
     def check_cancelled(self) -> None:
         if self.cancel.cancelled:
             raise AppError(ErrorCode.JOB_CANCELLED, status_code=409)
@@ -200,6 +204,17 @@ class AsyncioJobQueue:
                 logger.exception("job_finish_hook_failed", extra={"job_id": job_id})
         self._publish(job_id)
 
+    def _threadsafe_chunks(self, job_id: str, count: int) -> None:
+        def apply() -> None:
+            job = self._jobs.get(job_id)
+            if job is None or job.state.status.is_terminal or count <= job.state.chunks:
+                return
+            job.state.chunks = count
+            self._publish(job_id)
+
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(apply)
+
     def _threadsafe_update(self, job_id: str, status: JobStatus | None, progress: float | None,
                            message: str | None) -> None:
         def apply() -> None:
@@ -219,7 +234,8 @@ class AsyncioJobQueue:
 
     @staticmethod
     def _event(state: JobState) -> JobEvent:
-        return JobEvent(job_id=state.job_id, status=state.status, progress=state.progress, message=state.message)
+        return JobEvent(job_id=state.job_id, status=state.status, progress=state.progress, message=state.message,
+                        chunks=state.chunks)
 
     def _publish(self, job_id: str) -> None:
         job = self._jobs[job_id]

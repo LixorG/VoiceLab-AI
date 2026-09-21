@@ -6,6 +6,8 @@ import { AudioDownloadMenu } from '@/components/ui/download-menu'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { LivePlayer } from '@/features/audio/LivePlayer'
+import { CopyParamsButton } from '@/features/generation/ParamsClipboard'
 import { SyncedPlayers } from '@/features/audio/SyncedPlayers'
 import { ComparisonTable } from '@/features/comparison/ComparisonTable'
 import { GenerationMastering } from '@/features/postprocess/GenerationMastering'
@@ -51,6 +53,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
         {gen.text}
       </p>
 
+      <LivePlayer generationId={gen.id} chunks={gen.stream_chunks ?? 0} finished={!running} />
       {running && (
         <div className="space-y-1" aria-live="polite">
           {gen.progress_available || gen.status !== 'GENERATING' ? (
@@ -135,6 +138,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
         {ref && <span className="truncate">{tg.reference(ref.name ?? '', range)}</span>}
         <span className="ml-auto flex gap-0.5">
           {gen.audio_url && <AudioDownloadMenu url={gen.audio_url} />}
+          <CopyParamsButton compact gen={gen} label={gen.label ?? tg.kind[gen.kind as 'single'] ?? gen.engine} />
           {!running && (
             <Tooltip>
               <TooltipTrigger asChild>

@@ -23,6 +23,7 @@ class JobState(BaseModel):
     message: str | None = None  # Spanish, user-facing
     error_code: str | None = None
     result: dict[str, Any] | None = None
+    chunks: int = 0  # live-preview audio chunks ready so far (see app/generation/streaming.py)
 
 
 class JobEvent(BaseModel):
@@ -30,6 +31,7 @@ class JobEvent(BaseModel):
     status: JobStatus
     progress: float
     message: str | None = None
+    chunks: int = 0
 
 
 class JobQueue(Protocol):

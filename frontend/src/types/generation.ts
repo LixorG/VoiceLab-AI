@@ -47,6 +47,8 @@ export interface GenerationRead {
   status: JobStatus
   progress: number
   progress_available: boolean
+  /** Live-preview chunks ready so far: /api/generation/{id}/stream/{n}. */
+  stream_chunks?: number
   message: string | null
   error_code: string | null
   reference: { reference_id: string; name: string | null; start_s: number | null; end_s: number | null; text: string } | null
@@ -78,6 +80,7 @@ export interface JobEvent {
   status: JobStatus
   progress: number
   message: string | null
+  chunks?: number
 }
 
 export interface EngineRuntimeStatus {

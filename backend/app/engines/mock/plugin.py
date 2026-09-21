@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from app.engines.base import (
+    AudioCallback,
     CancelToken,
     ControlCapability,
     ControlSource,
@@ -46,7 +47,7 @@ class MockBackend(TTSBackend):
         return EngineCapabilities(
             variant=v.id, mode="clone", sample_rate=SR, languages=["es", "en"],
             requires_reference_audio=False, requires_reference_text=False,
-            reference_strategies=["best_reference"], deterministic_seed=True,
+            reference_strategies=["best_reference"], deterministic_seed=True, supports_streaming=True,
             controls={
                 GenericControl.SPEED: ControlCapability(source=ControlSource.NATIVE, parameter="speed"),
                 GenericControl.SEED: ControlCapability(source=ControlSource.NATIVE, parameter="seed"),
@@ -82,13 +83,18 @@ class MockBackend(TTSBackend):
     def prepare_reference(self, reference: ReferenceInput, variant: str) -> PreparedReference:
         return PreparedReference(engine=self.id, variant=variant, cache_key=reference.sha256)
 
-    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken) -> EngineResult:
+    def generate(self, request: EngineRequest, progress: ProgressCallback, cancel: CancelToken,
+                 on_audio: AudioCallback | None = None) -> EngineResult:
         params = self.validate_parameters(request.params, request.variant)
         seed = params["seed"] if params["seed"] is not None else random_seed()
         rng = np.random.default_rng(seed)
         duration = max(0.3, len(request.text) * 0.06 / params["speed"])
         t = np.arange(int(duration * SR)) / SR
         audio = (0.2 * np.sin(2 * np.pi * params["tone_hz"] * t) + rng.normal(0, 0.002, t.size)).astype(np.float32)
+        if on_audio is not None:  # live preview in two halves, like a streaming engine would
+            half = audio.size // 2
+            on_audio(audio[:half], SR)
+            on_audio(audio[half:], SR)
         progress(1.0, None)
         return EngineResult(audio=audio, sample_rate=SR, seed=seed, effective_params={**params, "seed": seed})
 

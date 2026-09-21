@@ -2,7 +2,9 @@ import { create } from 'zustand'
 
 import { ApiError } from '@/services/api'
 import { type GenerationRequest, generationApi, subscribeToJob } from '@/services/generation'
+import { t } from '@/i18n/es'
 import { keyOf, useEngineStore } from '@/stores/engine'
+import { type CopiedSettings, settingsFromGeneration } from '@/stores/paramsClipboard'
 import type { EngineRuntimeStatus, GenerationPlan, GenerationRead } from '@/types/generation'
 import { DEFAULT_POSTPROCESS, type PostProcessCapabilities, type PostProcessConfig, isPostprocessActive } from '@/types/postprocess'
 import { TERMINAL_STATUSES } from '@/types/generation'
@@ -45,11 +47,20 @@ interface GenerationState {
   load: () => Promise<void>
   generate: (preview: boolean) => Promise<void>
   repeat: (generation: GenerationRead) => Promise<void>
+  /** Apply copied settings (engine, variant, parameters, expression, post-processing); voice and text untouched. */
+  applySettings: (settings: CopiedSettings) => Promise<ApplyReport>
+  /** The current Generar settings, ready to copy. */
+  currentSettings: () => CopiedSettings | null
   cancel: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
   loadRuntime: () => Promise<void>
   downloadWeights: () => Promise<void>
   clearError: () => void
+}
+
+export interface ApplyReport {
+  applied: number
+  skipped: string[]
 }
 
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : String(err))
@@ -103,7 +114,11 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       gen.id,
       (event) => {
         streamed = true
-        set((s) => ({ items: s.items.map((g) => (g.id === event.job_id ? { ...g, status: event.status, progress: event.progress, message: event.message } : g)) }))
+        set((s) => ({
+          items: s.items.map((g) =>
+            g.id === event.job_id ? { ...g, status: event.status, progress: event.progress, message: event.message, stream_chunks: event.chunks ?? g.stream_chunks } : g,
+          ),
+        }))
       },
       () => {
         subscriptions.delete(gen.id)
@@ -223,22 +238,57 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     },
 
     repeat: async (generation) => {
-      const engine = useEngineStore.getState()
-      if (engine.engineId !== generation.engine || engine.variantId !== generation.variant) {
-        await engine.selectEngine(generation.engine)
-        if (generation.variant) await useEngineStore.getState().selectVariant(generation.variant)
-      }
-      for (const [id, value] of Object.entries(generation.params ?? {})) useEngineStore.getState().setValue(id, value)
-      set({
-        text: generation.text,
-        referenceId: generation.reference?.reference_id ?? get().referenceId,
-        emotion: generation.expression?.emotion ?? null,
-        intensity: generation.expression?.intensity ?? 50,
-        markup: generation.expression?.markup ?? true,
-        normalize: generation.expression?.normalize ?? true,
-        postprocess: generation.postprocess?.config ?? DEFAULT_POSTPROCESS,
-      })
+      await get().applySettings(settingsFromGeneration(generation, generation.label ?? generation.engine))
+      set({ text: generation.text, referenceId: generation.reference?.reference_id ?? get().referenceId })
       await get().generate(generation.kind === 'preview')
+    },
+
+    applySettings: async (settings) => {
+      const engineStore = useEngineStore.getState()
+      if (!engineStore.engines.some((e) => e.id === settings.engine)) {
+        throw new Error(t.paramsClipboard.unknownEngine(settings.engine))
+      }
+      if (engineStore.engineId !== settings.engine || engineStore.variantId !== settings.variant) {
+        await engineStore.selectEngine(settings.engine)
+        if (settings.variant) await useEngineStore.getState().selectVariant(settings.variant)
+      }
+      const known = new Set(useEngineStore.getState().config?.parameters.map((p) => p.id) ?? [])
+      const skipped: string[] = []
+      let applied = 0
+      for (const [id, value] of Object.entries(settings.params)) {
+        if (known.size && !known.has(id)) {
+          skipped.push(id)
+          continue
+        }
+        useEngineStore.getState().setValue(id, value)
+        applied += 1
+      }
+      set({
+        emotion: settings.emotion,
+        intensity: settings.intensity,
+        markup: settings.markup,
+        normalize: settings.normalize,
+        postprocess: settings.postprocess ?? DEFAULT_POSTPROCESS,
+      })
+      return { applied, skipped }
+    },
+
+    currentSettings: () => {
+      const { engineId, variantId, valuesByKey } = useEngineStore.getState()
+      if (!engineId) return null
+      const s = get()
+      return {
+        engine: engineId,
+        variant: variantId,
+        params: { ...valuesByKey[keyOf(engineId, variantId)] },
+        emotion: s.emotion,
+        intensity: s.intensity,
+        markup: s.markup,
+        normalize: s.normalize,
+        postprocess: isPostprocessActive(s.postprocess) ? s.postprocess : null,
+        label: t.paramsClipboard.fromGenerate,
+        copiedAt: new Date().toISOString(),
+      }
     },
 
     cancel: async (id) => {

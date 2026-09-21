@@ -3,13 +3,14 @@ import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n/es'
 import { keyOf, useEngineStore } from '@/stores/engine'
+import { useParamsClipboard } from '@/stores/paramsClipboard'
 import type { ParamValue } from '@/types/engines'
 import type { ProfileRead } from '@/types/profiles'
 
 const tx = t.experiments
 export const MAX_ARMS = 6
 
-export type ParamSource = 'default' | 'profile' | 'current'
+export type ParamSource = 'default' | 'profile' | 'current' | 'copied'
 
 export interface ArmDraft {
   key: number
@@ -28,11 +29,16 @@ export function armParams(arm: ArmDraft, profile: ProfileRead | null, valuesByKe
     return rec && rec.variant === arm.variant ? rec.params : {}
   }
   if (arm.source === 'current') return valuesByKey[keyOf(arm.engine, arm.variant)] ?? {}
+  if (arm.source === 'copied') {
+    const copied = useParamsClipboard.getState().copied
+    return copied && copied.engine === arm.engine && (copied.variant ?? arm.variant) === arm.variant ? copied.params : {}
+  }
   return {}
 }
 
 export function ArmsEditor({ arms, onChange, profile }: { arms: ArmDraft[]; onChange: (arms: ArmDraft[]) => void; profile: ProfileRead | null }) {
   const { engines, valuesByKey } = useEngineStore()
+  const copied = useParamsClipboard((s) => s.copied)
   const usable = engines.filter((e) => e.implemented)
 
   const patch = (key: number, update: Partial<ArmDraft>) => onChange(arms.map((a) => (a.key === key ? { ...a, ...update } : a)))
@@ -72,13 +78,20 @@ export function ArmsEditor({ arms, onChange, profile }: { arms: ArmDraft[]; onCh
                 ))}
               </select>
             )}
-            <select aria-label={tx.params} value={arm.source} onChange={(e) => patch(arm.key, { source: e.target.value as ParamSource })} className="h-8 rounded-md border bg-background px-2 text-xs">
+            <select aria-label={tx.params} value={arm.source} onChange={(e) => {
+              const source = e.target.value as ParamSource
+              // «Los copiados» also brings the engine and variant they were made with
+              patch(arm.key, source === 'copied' && copied ? { source, engine: copied.engine, variant: copied.variant ?? arm.variant } : { source })
+            }} className="h-8 rounded-md border bg-background px-2 text-xs">
               <option value="default">{tx.sources.default}</option>
               <option value="profile" disabled={!profileOk}>
                 {tx.sources.profile}
               </option>
               <option value="current" disabled={!currentOk}>
                 {tx.sources.current}
+              </option>
+              <option value="copied" disabled={!copied}>
+                {copied ? `${t.paramsClipboard.source} (${copied.label})` : t.paramsClipboard.source}
               </option>
             </select>
             <Button size="icon" variant="ghost" className="size-8" disabled={arms.length <= 1} onClick={() => onChange(arms.filter((a) => a.key !== arm.key))} aria-label={tx.removeArm}>
