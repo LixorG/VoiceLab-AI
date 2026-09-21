@@ -207,3 +207,48 @@ def test_cancel_between_segments(client, engines, profile_with_emotions):
     client.post(f"/api/jobs/{gen_id}/cancel")
     done = wait_done(client, gen_id)
     assert done["status"] == "CANCELLED" and done["audio_url"] is None
+
+
+class SentenceMock(MockBackend):
+    """Engine that sounds better sentence by sentence (like Qwen clone) and pads its output with silence."""
+
+    id = "sentencemock"
+
+    def capabilities(self, variant=None) -> EngineCapabilities:
+        return super().capabilities(variant).model_copy(update={"sentence_chunks": True, "max_chars_per_call": 300})
+
+    def generate(self, request, progress, cancel, on_audio=None):
+        import numpy as np
+
+        result = super().generate(request, progress, cancel)
+        pad = np.zeros(int(0.3 * result.sample_rate), dtype=np.float32)
+        return result.model_copy(update={"audio": np.concatenate([pad, result.audio, pad])})
+
+
+@requires_ffmpeg
+def test_sentence_engines_get_natural_pauses_of_exact_length(client, app, monkeypatch):
+    import io
+
+    registry = EngineRegistry()
+    registry.register(SentenceMock())
+    manager = ModelManager(registry, GPUManager("cpu"), "cpu")
+    app.dependency_overrides[get_model_manager] = lambda: manager
+    app.dependency_overrides[get_engine_registry] = lambda: registry
+    monkeypatch.setattr(generation_service, "get_model_manager", lambda: manager)
+    first = "Primera frase del guion, bastante larga para ir sola."
+    rest = ["Segunda frase, también larga para ir sola.", "Tercera frase del mismo párrafo, larga también."]
+    text = f"{first}\n\n{rest[0]} {rest[1]}"
+
+    done = wait_done(client, client.post("/api/generation", json={"engine": "sentencemock", "text": text,
+                                                                  "normalize": False}).json()["job_id"])
+    assert done["status"] == "COMPLETED"
+    assert [(s["text"], s["pause_after_ms"]) for s in done["segments"]] == [(first, 750), (rest[0], 350), (rest[1], 0)]
+    # the engine's own 0.3 s of silence is trimmed wherever a pause is inserted (a margin of 40/80 ms stays)
+    speech = [len(s["text"]) * 0.06 for s in done["segments"]]
+    trimmed = [s["duration_s"] for s in done["segments"]]
+    assert abs(trimmed[0] - (0.3 + speech[0] + 0.08)) < 0.02  # start untouched, end trimmed
+    assert abs(trimmed[1] - (0.04 + speech[1] + 0.08)) < 0.02
+    assert abs(trimmed[2] - (0.04 + speech[2] + 0.3)) < 0.02  # the final silence is not next to a pause
+    data, sr = sf.read(io.BytesIO(client.get(done["audio_url"]).content))
+    assert abs(data.size / sr - (sum(trimmed) + 0.75 + 0.35)) < 0.02
+    app.dependency_overrides.clear()

@@ -19,6 +19,11 @@ from app.generation.markup import ParsedMarkup, Pause, Sound, Style, TextRun
 from app.voice_profiles.emotions import EMOTIONS
 
 BREATH_PAUSE_MS = 300
+# Natural pauses when an engine generates sentence by sentence (engines with `sentence_chunks`).
+SENTENCE_PAUSE_MS = 350
+PARAGRAPH_PAUSE_MS = 750
+CLAUSE_PAUSE_MS = 150  # a sentence too long for one call is cut at a comma
+MIN_SENTENCE_CHARS = 40  # shorter sentences ("First." / "Yes!") are generated together with a neighbour
 SHOUT_MIN_WORDS = 3  # shorter all-caps runs are usually acronyms (IA, NASA, ONU)
 
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
@@ -58,6 +63,40 @@ _SENTENCE_END = re.compile(r"(?<=[.!?…;])\s+")
 _CLAUSE_END = re.compile(r"(?<=[,:])\s+")
 
 
+_PARAGRAPH = re.compile(r"\n\s*\n")
+_ENDS_PARAGRAPH = re.compile(r"\n\s*\n\s*$")
+_STARTS_PARAGRAPH = re.compile(r"\s*\n\s*\n")
+
+
+def sentence_chunks(text: str, max_chars: int) -> list[tuple[str, int]]:
+    """(chunk, pause after in ms): one chunk per sentence, paragraphs kept; the last pause is 0.
+
+    Very short sentences are merged with a neighbour (a lone "First." sounds clipped) and a sentence longer than
+    `max_chars` is cut at clause ends.
+    """
+    out: list[tuple[str, int]] = []
+    paragraphs = [p for p in (" ".join(block.split()) for block in _PARAGRAPH.split(text)) if p]
+    for para in paragraphs:
+        merged: list[str] = []
+        for sentence in (s for s in _SENTENCE_END.split(para) if s.strip()):
+            if merged and len(merged[-1]) < MIN_SENTENCE_CHARS and len(merged[-1]) + 1 + len(sentence) <= max_chars:
+                merged[-1] = f"{merged[-1]} {sentence}"
+            else:
+                merged.append(sentence)
+        if (len(merged) > 1 and len(merged[-1]) < MIN_SENTENCE_CHARS
+                and len(merged[-2]) + 1 + len(merged[-1]) <= max_chars):
+            merged[-2:] = [f"{merged[-2]} {merged[-1]}"]
+        for si, sentence in enumerate(merged):
+            pieces = split_long_text(sentence, max_chars)
+            for ki, piece in enumerate(pieces):
+                pause = (CLAUSE_PAUSE_MS if ki < len(pieces) - 1
+                         else SENTENCE_PAUSE_MS if si < len(merged) - 1 else PARAGRAPH_PAUSE_MS)
+                out.append((piece, pause))
+    if out:
+        out[-1] = (out[-1][0], 0)
+    return out
+
+
 def split_long_text(text: str, max_chars: int) -> list[str]:
     """Split at sentence ends (then clause ends, then spaces) so each chunk fits `max_chars`."""
     if len(text) <= max_chars:
@@ -86,6 +125,7 @@ def split_long_text(text: str, max_chars: int) -> list[str]:
 
 
 MAX_SEGMENTS = 60
+MAX_SENTENCE_SEGMENTS = 250  # sentence-by-sentence engines: about the same text length as 60 chunks of 300
 NEUTRAL_INTENSITY = 50
 
 _EMOTION_EN = {
@@ -233,8 +273,25 @@ def plan_generation(parsed: ParsedMarkup, caps: EngineCapabilities, engine_name:
     if segments:
         segments[-1].pause_after_ms += pending_pause
 
-    if caps.max_chars_per_call:
+    if caps.sentence_chunks:
         split: list[PlannedSegment] = []
+        for i, seg in enumerate(segments):
+            chunks = sentence_chunks(seg.text, caps.max_chars_per_call or 10_000)
+            for k, (part, pause) in enumerate(chunks):
+                last = k == len(chunks) - 1
+                split.append(PlannedSegment(
+                    0, part, seg.emotion, seg.intensity, seg.emphasis, seg.whisper, seg.pitch,
+                    pause_before_ms=seg.pause_before_ms if k == 0 else 0,
+                    pause_after_ms=seg.pause_after_ms if last else pause, emotion_via=seg.emotion_via))
+            if chunks and i < len(segments) - 1 and seg.pause_after_ms == 0:
+                # a style change at a sentence or paragraph end still gets its natural pause
+                if _ENDS_PARAGRAPH.search(seg.text) or _STARTS_PARAGRAPH.match(segments[i + 1].text):
+                    split[-1].pause_after_ms = PARAGRAPH_PAUSE_MS
+                elif seg.text.rstrip().endswith((".", "!", "?", "…")):
+                    split[-1].pause_after_ms = SENTENCE_PAUSE_MS
+        segments = split
+    elif caps.max_chars_per_call:
+        split = []
         for seg in segments:
             text = " ".join(seg.text.split())
             parts = split_long_text(text, caps.max_chars_per_call)
@@ -267,6 +324,7 @@ def plan_generation(parsed: ParsedMarkup, caps: EngineCapabilities, engine_name:
 
     if not cleaned:
         raise PlanError("No hay texto que generar.")
-    if len(cleaned) > MAX_SEGMENTS:
-        raise PlanError(f"El texto genera {len(cleaned)} segmentos; el máximo es {MAX_SEGMENTS}.")
+    limit = MAX_SENTENCE_SEGMENTS if caps.sentence_chunks else MAX_SEGMENTS
+    if len(cleaned) > limit:
+        raise PlanError(f"El texto genera {len(cleaned)} segmentos; el máximo es {limit}.")
     return GenerationPlan(segments=cleaned, warnings=list(warnings), has_markup=parsed.has_markup)

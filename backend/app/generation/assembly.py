@@ -43,6 +43,26 @@ def _fade_in(audio: np.ndarray, samples: int) -> np.ndarray:
     return out
 
 
+def trim_edges(audio: np.ndarray, sr: int, head: bool = True, tail: bool = True) -> np.ndarray:
+    """Remove the engine's own leading/trailing silence so an inserted pause lasts what it says.
+
+    Silence = 10 ms frames 40 dB below the loudest one (and never above −60 dBFS); a margin of 40 ms before the
+    voice and 80 ms after it keeps soft onsets and word endings.
+    """
+    frame = max(1, sr // 100)
+    n = audio.size // frame
+    if n < 3 or not (head or tail):
+        return audio
+    rms = np.sqrt(np.mean(audio[: n * frame].astype(np.float64).reshape(n, frame) ** 2, axis=1))
+    level = 20 * np.log10(rms + 1e-9)
+    voiced = np.flatnonzero(level > max(level.max() - 40, -60))
+    if voiced.size == 0:
+        return audio
+    start = max(0, voiced[0] * frame - int(0.04 * sr)) if head else 0
+    end = min(audio.size, (voiced[-1] + 1) * frame + int(0.08 * sr)) if tail else audio.size
+    return audio[start:end]
+
+
 def timeline(parts: list[SegmentAudio], crossfade_ms: int = CROSSFADE_MS) -> list[tuple[float, float]]:
     """(start_s, end_s) of every part inside the audio `assemble()` builds from the same parts (for subtitles)."""
     if not parts:

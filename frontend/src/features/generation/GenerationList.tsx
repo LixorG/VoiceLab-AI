@@ -138,7 +138,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
         {ref && <span className="truncate">{tg.reference(ref.name ?? '', range)}</span>}
         <span className="ml-auto flex gap-0.5">
           {gen.audio_url && <AudioDownloadMenu url={gen.audio_url} />}
-          <CopyParamsButton compact gen={gen} label={gen.label ?? tg.kind[gen.kind as 'single'] ?? gen.engine} />
+          <CopyParamsButton compact gen={gen} label={gen.label ?? `${gen.variant ?? gen.engine} · «${gen.text.length > 24 ? `${gen.text.slice(0, 24)}…` : gen.text}»`} />
           {!running && (
             <Tooltip>
               <TooltipTrigger asChild>

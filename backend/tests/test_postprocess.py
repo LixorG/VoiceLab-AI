@@ -10,7 +10,14 @@ import pytest
 import soundfile as sf
 
 from app.postprocess.config import PostProcessConfig
-from app.postprocess.processor import apply_fades, capabilities, loudness_lufs, process, trim_silence
+from app.postprocess.processor import (
+    apply_fades,
+    capabilities,
+    loudness_lufs,
+    noise_floor_dbfs,
+    process,
+    trim_silence,
+)
 from tests.audio_fixtures import requires_ffmpeg
 from tests.test_advanced_generation import engines as engines  # noqa: F401  (fixture re-export)
 from tests.test_generation import wait_done
@@ -102,6 +109,57 @@ def test_denoise_reduces_noise_floor():
     noisy[: SR // 2] = 0.02 * rng.standard_normal(SR // 2)  # noise-only lead-in
     out, report = process(noisy, SR, cfg(denoise={"enabled": True, "strength": "strong"}), ffmpeg)
     assert report.steps[0].id == "denoise" and np.std(out[SR // 4: SR // 2]) < np.std(noisy[SR // 4: SR // 2])
+
+
+def test_noise_floor_measurement():
+    rng = np.random.default_rng(1)
+    quiet = (0.001 * rng.standard_normal(SR)).astype(np.float32)  # ~-60 dBFS background
+    assert noise_floor_dbfs(quiet, SR) == pytest.approx(-60, abs=2)
+    assert noise_floor_dbfs(np.zeros(SR // 20, np.float32), SR) is None  # too short to tell
+
+
+def test_clean_audio_is_left_untouched_by_denoise():
+    """A clean take has nothing to remove: filtering it anyway is what made voices sound metallic."""
+    audio = tone()
+    audio[: SR // 2] = 0.0  # digital silence around the voice, like a TTS output
+    out, report = process(audio, SR, cfg(denoise={"enabled": True, "strength": "strong"}), ffmpeg="ffmpeg")
+    assert np.array_equal(out, audio)
+    assert report.steps[0].id == "denoise" and report.steps[0].detail.startswith("Sin cambios: el audio ya está limpio")
+    assert not report.warnings
+
+
+@requires_ffmpeg
+def test_denoise_uses_the_measured_floor_without_tracking(monkeypatch):
+    from app.postprocess import processor
+
+    seen = []
+    real = processor._run_ffmpeg
+    monkeypatch.setattr(processor, "_run_ffmpeg", lambda a, sr, f, ff: seen.append(f) or real(a, sr, f, ff))
+    rng = np.random.default_rng(0)
+    noisy = (tone() + 0.02 * rng.standard_normal(2 * SR)).astype(np.float32)
+    _, report = process(noisy, SR, cfg(denoise={"enabled": True, "strength": "medium"}), shutil.which("ffmpeg"))
+    assert seen and seen[0].startswith("afftdn=nr=12:nf=-") and seen[0].endswith(":tn=0")
+    assert "ruido de fondo medido" in report.steps[0].detail
+
+
+@requires_ffmpeg
+def test_speed_uses_atempo_and_pitch_warnings_follow_the_measurements(monkeypatch):
+    from app.postprocess import processor
+
+    ffmpeg = shutil.which("ffmpeg")
+    seen = []
+    real = processor._run_ffmpeg
+    monkeypatch.setattr(processor, "_run_ffmpeg", lambda a, sr, f, ff: seen.append(f) or real(a, sr, f, ff))
+    out, report = process(tone(), SR, cfg(time_stretch={"enabled": True, "rate": 0.95}), ffmpeg)
+    assert seen[-1] == "atempo=0.9500" and "atempo" in report.steps[0].detail and not report.warnings
+    _, report = process(tone(), SR, cfg(time_stretch={"enabled": True, "rate": 1.2}), ffmpeg)
+    assert any("10 %" in w for w in report.warnings)
+
+    if not capabilities(ffmpeg).processors["pitch_shift"]:
+        pytest.skip("FFmpeg sin rubberband")
+    for semitones, expected in ((0.5, None), (1.5, "ya se nota"), (3, "robótica")):
+        _, report = process(tone(), SR, cfg(pitch_shift={"enabled": True, "semitones": semitones}), ffmpeg)
+        assert (expected is None and not report.warnings) or any(expected in w for w in report.warnings)
 
 
 # ---------------------------------------------------------------- API

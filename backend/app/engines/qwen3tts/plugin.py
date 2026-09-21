@@ -83,6 +83,10 @@ _SPEED_NOTE = ("Con GPU, VoiceLab reproduce el decodificador y el predictor de c
                "esta máquina: de unas 7 veces la duración del audio a unas 0,6 (más rápido que tiempo real), con el "
                "mismo WER, la misma similitud de voz y la misma duración. Equivalente dentro de la precisión del "
                "modelo, no idéntico bit a bit; se desactiva con QWEN_CUDA_GRAPHS=false.")
+_SENTENCES_NOTE = ("Al clonar, los textos con varias frases se generan frase a frase con pausas naturales (más "
+                   "largas entre párrafos). Medido con una voz real: en llamadas largas el modelo habla un 15 % más "
+                   "deprisa, casi sin pausas y con la entonación más plana; frase a frase el ritmo y la entonación "
+                   "quedan más cerca de la referencia, con el mismo WER y la misma similitud de voz.")
 MAX_CHARS_PER_CALL = 300  # long single calls are very slow (cost grows with length) and can loop without ending
 CHARS_PER_SECOND = 14.0  # typical speech rate, only used to estimate progress and a runaway limit
 RUNAWAY_FACTOR = 3.0
@@ -184,10 +188,10 @@ class Qwen3TTSBackend(TTSBackend):
                 reference_duration_s=(3.0, 20.0),
                 reference_strategies=["best_reference", "profile", "per_segment"],
                 controls=controls, supports_streaming=True, supports_batch=True, reports_progress=True,
-                max_chars_per_call=MAX_CHARS_PER_CALL,
+                max_chars_per_call=MAX_CHARS_PER_CALL, sentence_chunks=True,
                 reference_text_not_required_when={"clone_mode": "x_vector"},
                 notes=["El prompt de clonación se calcula una vez por referencia y se reutiliza.",
-                       _SAMPLING_NOTE, _PROGRESS_NOTE, _SPEED_NOTE],
+                       _SENTENCES_NOTE, _SAMPLING_NOTE, _PROGRESS_NOTE, _SPEED_NOTE],
             )
 
         by_instruction = "Se pide dentro de la instrucción de estilo; el resultado no es un valor exacto."

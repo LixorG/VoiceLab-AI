@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import UTC, datetime
 
 from sqlmodel import Session, or_, select
@@ -11,19 +13,47 @@ from app.models.entities import PronunciationEntry, VoiceProfile
 from app.schemas.pronunciation import NormalizePreview, NormalizePreviewRead, PronunciationInput, TextChangeRead
 from app.text.normalization import SUPPORTED_LANGUAGES, DictionaryEntry, normalize_text, unique_changes
 
-# Engine language parameters use English names (Qwen3-TTS).
+# Engine language parameters use English names (Qwen3-TTS); voice profiles have a free field whose placeholder
+# suggests Spanish names ("Español"), so both are understood (compared without accents).
 ENGINE_LANGUAGES = {"spanish": "es", "english": "en", "chinese": "zh", "japanese": "ja", "korean": "ko",
-                    "german": "de", "french": "fr", "russian": "ru", "portuguese": "pt", "italian": "it"}
+                    "german": "de", "french": "fr", "russian": "ru", "portuguese": "pt", "italian": "it",
+                    "espanol": "es", "castellano": "es", "ingles": "en", "chino": "zh", "japones": "ja",
+                    "coreano": "ko", "aleman": "de", "frances": "fr", "ruso": "ru", "portugues": "pt",
+                    "italiano": "it"}
+# Frequent function words, to guess the language of a text when neither the engine nor the voice says it.
+_STOPWORDS = {
+    "es": frozenset("el la los las de del que y en un una por con para es no se su al lo como más pero sus le ya "
+                    "o este esta sí porque muy sin sobre también me hay tu te yo mi".split()),
+    "en": frozenset("the and of to a in is you that it for on with are this be your not as at have was but they "
+                    "i my me we he she do if so what".split()),
+}
+_WORDS = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def _plain(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
 
 def language_code(value: object) -> str | None:
-    """'Spanish' / 'es' / 'es-CO' → 'es'; 'Auto' or empty → None."""
-    text = str(value or "").strip().lower()
+    """'Spanish' / 'Inglés' / 'es' / 'es-CO' → code; 'Auto', empty or unknown → None."""
+    text = _plain(str(value or "")).strip().lower()
     if not text or text == "auto":
         return None
     if text in ENGINE_LANGUAGES:
         return ENGINE_LANGUAGES[text]
-    return text[:2] if len(text) == 2 or (len(text) == 5 and text[2] in "-_") else None
+    first = text.split()[0].strip("()")  # "Inglés (EE. UU.)"
+    if first in ENGINE_LANGUAGES:
+        return ENGINE_LANGUAGES[first]
+    return text[:2] if len(text) == 2 or (len(text) > 3 and text[2] in "-_" and text[:2].isalpha()) else None
+
+
+def guess_language(text: str) -> str | None:
+    """'es' or 'en' when the text clearly uses one language's function words; None when unsure."""
+    words = [w.lower() for w in _WORDS.findall(text)]
+    counts = {lang: sum(w in stop for w in words) for lang, stop in _STOPWORDS.items()}
+    best = max(counts, key=lambda lang: counts[lang])
+    others = max(v for lang, v in counts.items() if lang != best)
+    return best if counts[best] >= 2 and counts[best] >= 2 * others else None
 
 
 class PronunciationService:
@@ -80,15 +110,15 @@ class PronunciationService:
                 by_term[entry.term.lower()] = entry
         return [DictionaryEntry(e.term, e.replacement, e.case_sensitive) for e in by_term.values()]
 
-    def resolve_language(self, params: dict, profile_id: str | None) -> str | None:
-        """Engine language parameter → profile language → Spanish (the app's default content language)."""
+    def resolve_language(self, params: dict, profile_id: str | None, text: str = "") -> str | None:
+        """Engine language parameter → profile language → the text's own language → Spanish (app default)."""
         code = language_code(params.get("language"))
         if code:
             return code
         profile = self.session.get(VoiceProfile, profile_id) if profile_id else None
         if profile is not None and language_code(profile.language):
             return language_code(profile.language)
-        return "es"
+        return guess_language(text) or "es"
 
     def preview(self, body: NormalizePreview) -> NormalizePreviewRead:
         language = language_code(body.language)

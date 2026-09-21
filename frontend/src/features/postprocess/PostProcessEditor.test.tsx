@@ -45,15 +45,17 @@ describe('PostProcessEditor', () => {
     expect(latest.trim_silence).toEqual({ enabled: true, threshold_db: -50, padding_ms: 200 })
 
     toggle('Velocidad (DSP)')
-    slide('Factor de velocidad', 1.5)
-    expect(latest.time_stretch).toEqual({ enabled: true, rate: 1.5 })
-    expect(screen.getByText(/pueden sonar artificiales/)).toBeInTheDocument()
+    slide('Factor de velocidad', 1.2)
+    expect(latest.time_stretch).toEqual({ enabled: true, rate: 1.2 })
+    expect(screen.getByText(/empieza a sonar artificial/)).toBeInTheDocument()
 
     toggle('Tono (DSP)')
-    slide('Semitonos', -7)
+    slide('Semitonos', 1.5)
+    expect(screen.getByText(/el procesado ya se nota/)).toBeInTheDocument()
+    slide('Semitonos', -3)
     toggle('Conservar formantes (timbre más natural)')
-    expect(latest.pitch_shift).toEqual({ enabled: true, semitones: -7, preserve_formants: false })
-    expect(screen.getByText(/alteran notablemente el timbre/)).toBeInTheDocument()
+    expect(latest.pitch_shift).toEqual({ enabled: true, semitones: -3, preserve_formants: false })
+    expect(screen.getByText(/claramente robótica/)).toBeInTheDocument()
 
     toggle('Normalizar pico')
     expect(screen.getByLabelText('Objetivo')).toBeInTheDocument() // without loudness the peak is a target…

@@ -143,3 +143,28 @@ def test_real_encoder_refuses_without_weights():
     with pytest.raises(AppError) as exc:
         get_speaker_encoder().embed(tone(2.0), 24_000)
     assert "no está descargado" in exc.value.message
+
+
+def test_long_audio_is_embedded_in_windows(monkeypatch):
+    import torch
+
+    from app.evaluation import speaker
+
+    sizes: list[int] = []
+
+    class Model:
+        def __call__(self, input_values):
+            sizes.append(input_values.shape[-1])
+            return type("Out", (), {"embeddings": torch.tensor([[1.0, float(len(sizes))]])})()
+
+    encoder = SpeakerEncoder()
+    monkeypatch.setattr(encoder, "_load", lambda: None)
+    encoder._model = Model()
+    encoder._extractor = lambda wav, **_: {"input_values": torch.tensor(wav)[None]}
+    emb = encoder.embed(tone(45.5, sr=16_000), 16_000)  # 20 s + 20 s + 5.5 s
+    assert sizes == [20 * 16_000, 20 * 16_000, int(5.5 * 16_000)]
+    assert abs(float(np.linalg.norm(emb)) - 1.0) < 1e-6
+    sizes.clear()
+    encoder.embed(tone(20.5, sr=16_000), 16_000)  # a sub-second tail is dropped
+    assert sizes == [20 * 16_000]
+    assert speaker.WINDOW_SECONDS == 20

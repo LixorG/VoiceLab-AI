@@ -31,6 +31,7 @@ SPEAKER_DOWNLOAD_MB = 405
 SPEAKER_SAMPLE_RATE = 16_000
 SAME_SPEAKER_THRESHOLD = 0.86  # from the model card (VoxCeleb1); orientation only
 MIN_SECONDS = 1.0
+WINDOW_SECONDS = 20
 
 DownloadState = Literal["idle", "downloading", "failed"]
 
@@ -132,16 +133,25 @@ class SpeakerEncoder:
         logger.info("speaker_model_loaded")
 
     def embed(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
+        """One embedding per window of up to WINDOW_SECONDS, averaged: attention memory grows with the square of
+        the length (a 3-minute clip asked for ~4 GB at once)."""
         import torch
 
         wav = to_16k(audio, sample_rate)
+        size, min_size = WINDOW_SECONDS * SPEAKER_SAMPLE_RATE, int(MIN_SECONDS * SPEAKER_SAMPLE_RATE)
+        windows = [wav[i:i + size] for i in range(0, wav.size, size)]
+        if len(windows) > 1 and windows[-1].size < min_size:
+            windows.pop()  # a sub-second tail says little about the voice
+        embeddings = []
         with self._lock:
             self._load()
-            inputs = self._extractor(wav, sampling_rate=SPEAKER_SAMPLE_RATE, return_tensors="pt", padding=True)
-            with torch.inference_mode():
-                embedding = self._model(**inputs).embeddings
-            embedding = torch.nn.functional.normalize(embedding, dim=-1)
-        return embedding[0].cpu().numpy()
+            for window in windows:
+                inputs = self._extractor(window, sampling_rate=SPEAKER_SAMPLE_RATE, return_tensors="pt", padding=True)
+                with torch.inference_mode():
+                    embedding = self._model(**inputs).embeddings
+                embeddings.append(torch.nn.functional.normalize(embedding, dim=-1)[0].cpu().numpy())
+        mean = np.mean(embeddings, axis=0)
+        return mean / (np.linalg.norm(mean) or 1.0)
 
     def unload(self) -> None:
         with self._lock:

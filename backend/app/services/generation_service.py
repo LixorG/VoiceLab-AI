@@ -28,7 +28,7 @@ from app.core.database import get_engine
 from app.core.errors import AppError, ErrorCode
 from app.engines.base import SEED_MAX, ControlSource, EngineRequest, GenericControl, ReferenceInput, TTSBackend
 from app.engines.manager import ModelManager, get_model_manager
-from app.generation.assembly import SegmentAudio, assemble
+from app.generation.assembly import SegmentAudio, assemble, trim_edges
 from app.generation.markup import MarkupError, ParsedMarkup, Style, TextRun, parse
 from app.generation.planner import GenerationPlan, PlanError, plan_generation
 from app.generation.streaming import StreamWriter, silence
@@ -195,7 +195,7 @@ class GenerationService:
         from app.text.normalization import normalize_text, unique_changes
 
         service = PronunciationService(self.session)
-        language = service.resolve_language(params, body.profile_id)
+        language = service.resolve_language(params, body.profile_id, body.text)
         dictionary = service.dictionary(body.profile_id)
         changes = []
         for event in parsed.events:
@@ -620,6 +620,8 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
             else:
                 n = len(segments)
                 parts: list[SegmentAudio] = []
+                # sentence-by-sentence engines: exact pauses (their own edge silence would add to them)
+                trim = engine.capabilities(gen.variant).sentence_chunks
                 for i, seg in enumerate(segments):
                     phase(JobStatus.GENERATING, 0.15 + 0.8 * i / n, f"Generando segmento {i + 1} de {n}…")
                     reference = prepared(seg.reference_snapshot)
@@ -629,6 +631,10 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                         JobStatus.GENERATING, 0.15 + 0.8 * (i + max(0.0, min(1.0, p))) / n,
                         f"Segmento {i + 1} de {n}" + (f": {msg}" if msg else "…")))
                     seg_audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                    if trim:
+                        pause_before = segments[i - 1].pause_after_ms if i > 0 else seg.pause_before_ms
+                        seg_audio = trim_edges(seg_audio, result.sample_rate, head=pause_before > 0,
+                                               tail=seg.pause_after_ms > 0)
                     seg.seed = result.seed
                     seg.params = {**(seg.params or {}), **result.effective_params}
                     seg.duration_s = round(seg_audio.size / result.sample_rate, 3) if result.sample_rate else None

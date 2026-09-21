@@ -96,6 +96,9 @@ class EngineCapabilities(BaseModel):
     reports_progress: bool = Field(default=True, description="El motor informa del progreso durante la generación")
     max_chars_per_call: int | None = Field(
         default=None, description="Texto máximo por llamada al modelo; los textos más largos se dividen por frases")
+    sentence_chunks: bool = Field(
+        default=False, description="Los textos con varias frases se generan frase a frase, con pausas naturales entre "
+                                   "frases y párrafos")
     reference_text_not_required_when: dict[str, Any] | None = Field(
         default=None, description="Valores de parámetros con los que la transcripción de la referencia es opcional")
     notes: list[str] = []

@@ -99,3 +99,25 @@ def test_markup_tags_survive_normalisation(client, engines):  # noqa: F811
     texts = [s["text"] for s in plan["segments"]]
     assert texts == ["Son dos cosas.", "Y tres más."]
     assert plan["segments"][0]["pause_after_ms"] == 300
+
+
+def test_language_names_in_spanish_and_text_guess():
+    from app.services.pronunciation_service import guess_language, language_code
+
+    assert [language_code(v) for v in ("Inglés", "ingles", "Español", "Inglés (EE. UU.)", "es-419", "English",
+                                       "Auto", "", "Klingon")] == ["en", "en", "es", "en", "es", "en", None, None, None]
+    assert guess_language("4 signs you're becoming a high-value man. First, you stop explaining yourself.") == "en"
+    assert guess_language("Son las cosas que hacen que la gente se quede contigo.") == "es"
+    assert guess_language("OK 42") is None
+
+
+def test_numbers_follow_the_voice_or_the_text_language(client, engines):  # noqa: F811
+    pid = client.post("/api/voices", json={"name": "Hanna", "language": "Inglés"}).json()["id"]
+    body = {"engine": "mock", "text": "4 signs, not 3.", "params": {}}
+    by_profile = client.post("/api/generation/plan", json={**body, "profile_id": pid}).json()
+    assert by_profile["normalize_language"] == "en" and by_profile["segments"][0]["text"] == "four signs, not three."
+    english = "You got 4 signs and the rest is yours."
+    by_text = client.post("/api/generation/plan", json={**body, "text": english}).json()
+    assert by_text["normalize_language"] == "en" and by_text["segments"][0]["text"].startswith("You got four signs")
+    spanish = client.post("/api/generation/plan", json={**body, "text": "Son 4."}).json()
+    assert spanish["normalize_language"] == "es"  # too little text to tell: the app default

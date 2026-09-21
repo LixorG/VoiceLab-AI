@@ -167,3 +167,51 @@ def test_long_text_is_split_for_engines_with_a_per_call_limit():
     assert [s.pause_after_ms for s in plan.segments][-2:] == [500, 0]  # the user's pause stays at its place
     assert any("se genera por frases" in w for w in plan.warnings)
 
+
+
+def test_sentence_chunks_keep_paragraphs_and_merge_tiny_sentences():
+    from app.generation.planner import PARAGRAPH_PAUSE_MS, SENTENCE_PAUSE_MS, sentence_chunks
+
+    text = ("Cuatro señales de que vas por buen camino.\n\n  Primero. Dejas de dar explicaciones a todo el mundo. "
+            "Segundo: cuidas tu tiempo como si valiera oro.\n\nGuárdalo.")
+    assert sentence_chunks(text, 300) == [
+        ("Cuatro señales de que vas por buen camino.", PARAGRAPH_PAUSE_MS),
+        ("Primero. Dejas de dar explicaciones a todo el mundo.", SENTENCE_PAUSE_MS),  # "Primero." is too short alone
+        ("Segundo: cuidas tu tiempo como si valiera oro.", PARAGRAPH_PAUSE_MS),
+        ("Guárdalo.", 0),
+    ]
+    # a trailing short sentence joins the previous one; a sentence too long for one call is cut at commas
+    assert sentence_chunks("Una frase normal y bastante larga de verdad. Fin.", 300) == [
+        ("Una frase normal y bastante larga de verdad. Fin.", 0)]
+    long = sentence_chunks("uno dos tres cuatro, cinco seis siete ocho, nueve diez once doce.", 30)
+    assert [p for _, p in long] == [150, 150, 0] and all(len(c) <= 30 for c, _ in long)
+    assert sentence_chunks("", 300) == []
+
+
+def test_qwen_clone_plans_sentence_by_sentence_with_natural_pauses():
+    text = ("Esta es la primera frase del guion completo. Esta es la segunda frase del mismo párrafo.\n\n"
+            "[emoción:feliz]Y esta es la frase alegre del segundo párrafo.[/emoción] Última frase del guion, ya sin "
+            "ninguna emoción.")
+    plan = plan_generation(parse(text), QWEN_CLONE, "Qwen3-TTS", None, 50, {"happy"})
+    assert [s.emotion for s in plan.segments] == [None, None, "happy", None]
+    assert [s.pause_after_ms for s in plan.segments] == [350, 750, 350, 0]  # style change at a sentence end: 350
+    assert not any("se genera por frases" in w for w in plan.warnings)
+    single = plan_generation(parse("Solo una frase."), QWEN_CLONE, "Qwen3-TTS", None, 50)
+    assert single.is_simple  # one sentence keeps the plain single-call path
+
+    with pytest.raises(PlanError, match="el máximo es 250"):
+        plan_generation(parse("Esta es una frase bastante larga para ir sola. " * 251), QWEN_CLONE, "Qwen3-TTS",
+                        None, 50)
+
+
+def test_trim_edges_removes_engine_silence_but_keeps_a_margin():
+    from app.generation.assembly import trim_edges
+
+    sr = 24_000
+    voice = (0.3 * np.sin(2 * np.pi * 200 * np.arange(sr) / sr)).astype(np.float32)
+    padded = np.concatenate([np.zeros(sr // 2, np.float32), voice, np.zeros(sr // 2, np.float32)])
+    both = trim_edges(padded, sr)
+    assert abs(both.size / sr - (0.04 + 1.0 + 0.08)) < 0.011
+    assert trim_edges(padded, sr, head=False).size / sr > 1.5 and trim_edges(padded, sr, tail=False).size / sr > 1.5
+    silent = np.zeros(sr, np.float32)
+    assert trim_edges(silent, sr).size == sr and trim_edges(voice[:100], sr).size == 100

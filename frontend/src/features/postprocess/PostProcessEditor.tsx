@@ -140,20 +140,20 @@ export function PostProcessEditor({ value, onChange, capabilities, nativeSpeedPa
 
       {section(
         'time_stretch',
-        <Range id={`${idPrefix}-rate`} label={tp.fields.rate} value={value.time_stretch.rate} min={0.5} max={2} step={0.05} format={(v) => `×${v.toFixed(2)}`} onChange={(v) => patch('time_stretch', { rate: v })} />,
-        nativeSpeedParameter ? tp.warnings.nativeSpeed(nativeSpeedParameter) : Math.abs(value.time_stretch.rate - 1) > 0.25 ? tp.warnings.largeStretch : null,
+        <Range id={`${idPrefix}-rate`} label={tp.fields.rate} value={value.time_stretch.rate} min={0.75} max={1.33} step={0.01} format={(v) => `×${v.toFixed(2)}`} onChange={(v) => patch('time_stretch', { rate: v })} />,
+        nativeSpeedParameter ? tp.warnings.nativeSpeed(nativeSpeedParameter) : Math.abs(value.time_stretch.rate - 1) > 0.1 ? tp.warnings.largeStretch : null,
       )}
 
       {section(
         'pitch_shift',
         <>
-          <Range id={`${idPrefix}-semitones`} label={tp.fields.semitones} value={value.pitch_shift.semitones} min={-12} max={12} step={0.5} format={(v) => `${v > 0 ? '+' : ''}${v} st`} onChange={(v) => patch('pitch_shift', { semitones: v })} />
+          <Range id={`${idPrefix}-semitones`} label={tp.fields.semitones} value={value.pitch_shift.semitones} min={-4} max={4} step={0.25} format={(v) => `${v > 0 ? '+' : ''}${v} st`} onChange={(v) => patch('pitch_shift', { semitones: v })} />
           <label className="flex items-center gap-2 text-[11px]">
             <input type="checkbox" className="accent-[var(--primary)]" checked={value.pitch_shift.preserve_formants} onChange={(e) => patch('pitch_shift', { preserve_formants: e.target.checked })} />
             {tp.fields.preserveFormants}
           </label>
         </>,
-        Math.abs(value.pitch_shift.semitones) > 4 ? tp.warnings.largePitch : null,
+        Math.abs(value.pitch_shift.semitones) > 2 ? tp.warnings.largePitch : Math.abs(value.pitch_shift.semitones) > 1 ? tp.warnings.noticeablePitch : null,
       )}
 
       {section(

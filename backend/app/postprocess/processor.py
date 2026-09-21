@@ -28,12 +28,18 @@ from app.postprocess.config import (
 logger = logging.getLogger("voicelab.postprocess")
 
 FFMPEG_TIMEOUT_S = 180
-DENOISE_REDUCTION_DB = {"light": 6, "medium": 12, "strong": 20}
+DENOISE_REDUCTION_DB = {"light": 6, "medium": 12, "strong": 18}
 DENOISE_LABEL = {"light": "suave", "medium": "media", "strong": "fuerte"}
+# Measured on real TTS output: a clean take has a noise floor around -57 dBFS. Denoising it anyway changed the
+# voice (log-spectral distance 2.5–5.5 dB) with nothing to remove, which is what makes it sound metallic.
+CLEAN_FLOOR_DBFS = -55.0
 LOUDNESS_MIN_S = 0.5
 SAFETY_CEILING_DBFS = -1.0
-LARGE_PITCH_SEMITONES = 4.0
-LARGE_STRETCH = 0.25
+# Measured round trips on a real voice: every semitone of pitch shift adds clearly audible artefacts
+# (±1 st: 8.5 dB, ±2 st: 12 dB, ±4 st: 18 dB of spectral distance); speed changes are gentler.
+NOTICEABLE_PITCH_SEMITONES = 1.0
+LARGE_PITCH_SEMITONES = 2.0
+LARGE_STRETCH = 0.10
 
 
 # ---------------------------------------------------------------------------- capabilities
@@ -53,9 +59,9 @@ def ffmpeg_filters(ffmpeg: str) -> frozenset[str]:
 
 def capabilities(ffmpeg: str | None) -> PostProcessCapabilities:
     filters = ffmpeg_filters(ffmpeg) if ffmpeg else frozenset()
-    has_rubberband, has_afftdn = "rubberband" in filters, "afftdn" in filters
+    has_rubberband, has_afftdn, has_atempo = "rubberband" in filters, "afftdn" in filters, "atempo" in filters
     processors = {"trim_silence": True, "loudness": True, "peak": True, "fades": True, "crossfade": True,
-                  "denoise": has_afftdn, "time_stretch": has_rubberband, "pitch_shift": has_rubberband}
+                  "denoise": has_afftdn, "time_stretch": has_atempo, "pitch_shift": has_rubberband}
     reasons: dict[str, str] = {}
     if not ffmpeg:
         missing = "FFmpeg no está disponible."
@@ -63,8 +69,10 @@ def capabilities(ffmpeg: str | None) -> PostProcessCapabilities:
         missing = "La versión de FFmpeg instalada no incluye el filtro «{}»."
     if not has_afftdn:
         reasons["denoise"] = missing.format("afftdn")
+    if not has_atempo:
+        reasons["time_stretch"] = missing.format("atempo")
     if not has_rubberband:
-        reasons["time_stretch"] = reasons["pitch_shift"] = missing.format("rubberband")
+        reasons["pitch_shift"] = missing.format("rubberband")
     return PostProcessCapabilities(processors=processors, reasons=reasons)
 
 
@@ -104,6 +112,16 @@ def _run_ffmpeg(audio: np.ndarray, sr: int, filters: str, ffmpeg: str) -> np.nda
             raise AppError(ErrorCode.POSTPROCESS_ERROR, status_code=500)
         out, _ = sf.read(dst, dtype="float32", always_2d=False)
     return np.asarray(out, dtype=np.float32).reshape(-1)
+
+
+def noise_floor_dbfs(audio: np.ndarray, sr: int) -> float | None:
+    """Level of the quietest stretches (10th percentile of 20 ms RMS): the background the voice sits on."""
+    frame = max(1, sr // 50)
+    usable = audio.size // frame * frame
+    if usable < frame * 10:
+        return None
+    rms = np.sqrt(np.mean(audio[:usable].reshape(-1, frame).astype(np.float64) ** 2, axis=1))
+    return _db(float(np.percentile(rms, 10)))
 
 
 def trim_silence(audio: np.ndarray, sr: int, threshold_db: float, padding_ms: int) -> tuple[np.ndarray, float, float]:
@@ -154,13 +172,23 @@ def process(audio: np.ndarray, sr: int, config: PostProcessConfig, ffmpeg: str |
         return True
 
     if config.denoise.enabled and not unavailable("denoise"):
-        reduction = DENOISE_REDUCTION_DB[config.denoise.strength]
-        audio = _run_ffmpeg(audio, sr, f"afftdn=nr={reduction}:nf=-50:tn=1", ffmpeg or "")
-        steps.append(ProcessingStep(id="denoise", label="Limpieza de ruido",
-                                    detail=f"Intensidad {DENOISE_LABEL[config.denoise.strength]} "
-                                           f"(reducción {reduction} dB, FFmpeg afftdn)."))
-        if config.denoise.strength == "strong":
-            warnings.append("La limpieza de ruido fuerte puede producir artefactos metálicos en la voz.")
+        floor = noise_floor_dbfs(audio, sr)
+        if floor is None or floor < CLEAN_FLOOR_DBFS:
+            # Nothing to remove: filtering a clean take only reshapes the voice.
+            level = f"{floor:.0f} dBFS" if floor is not None else "no medible"
+            steps.append(ProcessingStep(id="denoise", label="Limpieza de ruido",
+                                        detail=f"Sin cambios: el audio ya está limpio (ruido de fondo {level}); "
+                                               "limpiarlo solo deformaría la voz."))
+        else:
+            reduction = DENOISE_REDUCTION_DB[config.denoise.strength]
+            # Noise floor measured on this audio and kept fixed (no tracking): tracking adapts to the voice itself.
+            nf = min(-20.0, max(-80.0, floor))
+            audio = _run_ffmpeg(audio, sr, f"afftdn=nr={reduction}:nf={nf:.0f}:tn=0", ffmpeg or "")
+            steps.append(ProcessingStep(id="denoise", label="Limpieza de ruido",
+                                        detail=f"Intensidad {DENOISE_LABEL[config.denoise.strength]}: ruido de fondo "
+                                               f"medido {floor:.0f} dBFS, reducción {reduction} dB (FFmpeg afftdn)."))
+            if config.denoise.strength == "strong":
+                warnings.append("La limpieza de ruido fuerte puede producir artefactos metálicos en la voz.")
 
     if config.trim_silence.enabled:
         audio, cut_start, cut_end = trim_silence(audio, sr, config.trim_silence.threshold_db,
@@ -169,28 +197,30 @@ def process(audio: np.ndarray, sr: int, config: PostProcessConfig, ffmpeg: str |
                                     detail=f"Inicio −{cut_start:.2f} s, final −{cut_end:.2f} s "
                                            f"(umbral {config.trim_silence.threshold_db:.0f} dBFS)."))
 
-    rubberband: list[str] = []
     ts, ps = config.time_stretch, config.pitch_shift
     if ts.enabled and ts.rate != 1.0 and not unavailable("time_stretch"):
-        rubberband.append(f"tempo={ts.rate:.4f}")
+        # atempo (time-domain overlap-add) measured with fewer artefacts on speech than a phase vocoder.
+        audio = _run_ffmpeg(audio, sr, f"atempo={ts.rate:.4f}", ffmpeg or "")
         steps.append(ProcessingStep(id="time_stretch", label="Cambio de velocidad (DSP)",
-                                    detail=f"×{ts.rate:.2f} sin cambiar el tono (rubberband)."))
+                                    detail=f"×{ts.rate:.2f} sin cambiar el tono (FFmpeg atempo)."))
         if native_speed_parameter:
             warnings.append(f"Este motor controla la velocidad de forma nativa (parámetro «{native_speed_parameter}»), "
                             "que suele sonar más natural que el cambio de velocidad posterior.")
         if abs(ts.rate - 1.0) > LARGE_STRETCH:
-            warnings.append("Cambios de velocidad grandes pueden sonar artificiales.")
+            warnings.append("Cambios de velocidad de más de un 10 % empiezan a sonar artificiales.")
     if ps.enabled and ps.semitones != 0 and not unavailable("pitch_shift"):
-        rubberband.append(f"pitch={2 ** (ps.semitones / 12):.6f}")
-        if ps.preserve_formants:
-            rubberband.append("formant=preserved")
+        options = [f"pitch={2 ** (ps.semitones / 12):.6f}", *(["formant=preserved"] if ps.preserve_formants else []),
+                   "pitchq=quality"]
+        audio = _run_ffmpeg(audio, sr, "rubberband=" + ":".join(options), ffmpeg or "")
         steps.append(ProcessingStep(id="pitch_shift", label="Cambio de tono (DSP)",
-                                    detail=f"{ps.semitones:+.1f} semitonos, formantes "
+                                    detail=f"{ps.semitones:+.2f} semitonos, formantes "
                                            f"{'conservados' if ps.preserve_formants else 'desplazados'} (rubberband)."))
         if abs(ps.semitones) > LARGE_PITCH_SEMITONES:
-            warnings.append("Desplazamientos de tono grandes alteran notablemente el timbre de la voz.")
-    if rubberband:
-        audio = _run_ffmpeg(audio, sr, "rubberband=" + ":".join([*rubberband, "pitchq=quality"]), ffmpeg or "")
+            warnings.append("Más de 2 semitonos: la voz suena claramente procesada (robótica). Para otra altura, "
+                            "es mejor usar una referencia con esa voz.")
+        elif abs(ps.semitones) > NOTICEABLE_PITCH_SEMITONES:
+            warnings.append("Cambiar el tono después de generar siempre añade algo de artefacto; por encima de "
+                            "1 semitono ya se nota.")
 
     if config.loudness.enabled:
         measured = loudness_lufs(audio, sr)
