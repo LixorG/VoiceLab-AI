@@ -63,7 +63,8 @@ export default function App() {
         </a>
         <div className="flex min-h-0 flex-1">
           <Sidebar />
-          <main id="contenido" className="min-w-0 flex-1">
+          {/* `relative`: anything positioned inside a section belongs to the section, never to the page */}
+          <main id="contenido" className="relative min-h-0 min-w-0 flex-1">
             <Suspense fallback={<div className="p-6"><Skeleton className="h-64" /></div>}>
               <SectionView section={section} />
             </Suspense>

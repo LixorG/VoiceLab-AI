@@ -102,6 +102,14 @@
   #root {
     height: 100%;
   }
+  /* The shell itself never scrolls: every panel has its own scroll area. Without this, any absolutely positioned
+     descendant of a scrolled list (a `sr-only` label, a menu) reaches the document instead of its panel and the
+     whole app — sidebar and status bar included — scrolls away, leaving the empty canvas (black in dark mode). */
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: 'ss01', 'tnum';
