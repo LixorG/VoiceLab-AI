@@ -20,6 +20,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // The heaviest tests (experiments, lazy sections) take ~5 s alone and more when the whole suite runs in
+    // parallel on a busy machine: the 5 s default made them fail at random.
+    testTimeout: 20_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
