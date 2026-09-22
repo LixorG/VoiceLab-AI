@@ -57,8 +57,12 @@ export function GeneratePage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
-      <div className="min-w-0 flex-1 xl:overflow-y-auto">
-        <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
+      {/* The text and the settings panel read as one block: the column grows and the panel widens with the
+          screen, so they stay side by side instead of drifting apart on a wide monitor. */}
+      <div className="relative min-w-0 flex-1 xl:overflow-y-auto">
+        {/* With the settings panel beside it (xl) the column fills its space, so both read as one block; when the
+            panel stacks underneath (narrow screens) the text is centred and capped for comfortable reading. */}
+        <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6 xl:max-w-none">
           <header>
             <h1 className="text-2xl font-semibold tracking-tight">{t.generate.title}</h1>
             <p className="text-sm text-muted-foreground">{t.generate.subtitle}</p>
@@ -92,7 +96,7 @@ export function GeneratePage() {
         </div>
       </div>
 
-      <aside className="flex w-full shrink-0 flex-col border-t bg-panel xl:w-80 xl:border-t-0 xl:border-l">
+      <aside className="relative flex w-full shrink-0 flex-col border-t bg-panel xl:w-80 xl:border-t-0 xl:border-l 2xl:w-[22rem]">
         <div className="flex-1 space-y-4 p-5 xl:overflow-y-auto">
           <QueuePanel />
           <ParamsClipboardBar />
