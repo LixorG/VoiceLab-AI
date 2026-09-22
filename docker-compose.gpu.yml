@@ -5,7 +5,7 @@ services:
     build:
       args:
         TORCH_INDEX: https://download.pytorch.org/whl/cu128
-    image: voicelab-ai:1.0.0-cuda
+    image: voicelab-ai:1.1.0-cuda
     environment:
       DEVICE: cuda
     deploy:

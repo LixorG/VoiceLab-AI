@@ -215,3 +215,27 @@ def test_trim_edges_removes_engine_silence_but_keeps_a_margin():
     assert trim_edges(padded, sr, head=False).size / sr > 1.5 and trim_edges(padded, sr, tail=False).size / sr > 1.5
     silent = np.zeros(sr, np.float32)
     assert trim_edges(silent, sr).size == sr and trim_edges(voice[:100], sr).size == 100
+
+
+def test_elevenlabs_tags_are_understood_by_the_parser():
+    parsed = parse("[pause] Hola. [excited] Qué bien. Y ya. [whispers] secreto. Normal.")
+    pause = parsed.events[0]
+    assert isinstance(pause, Pause) and pause.ms == 500
+    runs = [(e.text, e.style.emotion, e.style.whisper) for e in parsed.events if isinstance(e, TextRun)]
+    assert runs == [(" Hola. ", None, False), (" Qué bien. ", "excited", False), ("Y ya. ", None, False),
+                    (" secreto. ", None, True), ("Normal.", None, False)]
+    assert parse("[long pause]x").events[0].ms == 1000
+    assert [e.kind for e in parse("[laughs] ja [sighs] ay [breathes] uf").events if isinstance(e, Sound)] == [
+        "laugh", "sigh", "breath"]
+    word = [(e.text, e.style.emphasis) for e in parse("[stress on next word] Nunca jamás.").events]
+    assert word == [(" Nunca", True), (" jamás.", False)]
+
+
+def test_elevenlabs_tags_nothing_can_do_are_ignored_with_a_warning():
+    parsed = parse("[sarcastic] Claro. [rapid-fire] uno dos tres.")
+    assert [e.text for e in parsed.events] == [" Claro.  uno dos tres."]  # same style: one run
+    assert len(parsed.warnings) == 2 and "[sarcastic]" in parsed.warnings[0]
+    plan = plan_generation(parsed, QWEN_CLONE, "Qwen3-TTS", None, 50)
+    assert any("[sarcastic]" in w for w in plan.warnings)  # the warning reaches the plan
+    with pytest.raises(MarkupError, match="Etiqueta desconocida"):
+        parse("[inventada] x")

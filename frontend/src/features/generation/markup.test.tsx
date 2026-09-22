@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MarkupToolbar, PlanPreview } from '@/features/generation/MarkupTools'
+import { useEngineStore } from '@/stores/engine'
 import { useGenerationStore } from '@/stores/generation'
 import { useProfilesStore } from '@/stores/profiles'
+import { qwenConfig } from '@/test/engineFixtures'
+import type { EngineConfig } from '@/types/engines'
 
 function Editor() {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -21,6 +24,7 @@ function Editor() {
 beforeEach(() => {
   useGenerationStore.setState({ text: 'Hola mundo', markup: true, plan: null, planError: null })
   useProfilesStore.setState({ emotions: [{ id: 'happy', label: 'Feliz' }] } as never)
+  useEngineStore.setState({ config: null })
 })
 
 describe('MarkupToolbar', () => {
@@ -34,6 +38,33 @@ describe('MarkupToolbar', () => {
     area.setSelectionRange(4, 4)
     fireEvent.click(screen.getByRole('button', { name: 'Pausa' }))
     expect(useGenerationStore.getState().text).toBe('Hola[pausa:500ms] [susurro]mundo[/susurro]')
+  })
+
+  it('offers no pitch tag and disables what the engine cannot apply, with its reason', () => {
+    const withControls = (over: Partial<EngineConfig['capabilities']['controls']>): EngineConfig => ({
+      ...qwenConfig,
+      capabilities: { ...qwenConfig.capabilities, controls: { ...qwenConfig.capabilities.controls, ...over } },
+    })
+    const cap = (source: string, reason: string | null) => ({ source, parameter: null, reason, available_from_phase: null })
+    // cloning: emotion through a tagged reference, no style instructions
+    useEngineStore.setState({ config: withControls({
+      emotion: cap('segmentation', 'La emoción depende de la referencia.') as never,
+      instruction: cap('unavailable', 'generate_voice_clone no acepta instrucciones.') as never,
+    }) })
+    const { unmount } = render(<Editor />)
+    expect(screen.queryByRole('button', { name: 'Tono' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Pausa larga' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Emoción' })).toBeEnabled()
+    const whisper = screen.getByRole('button', { name: 'Susurro' })
+    expect(whisper).toBeDisabled()
+    expect(whisper).toHaveAttribute('title', expect.stringContaining('generate_voice_clone no acepta instrucciones'))
+    unmount()
+
+    // a voice with style instructions (Qwen CustomVoice): emphasis and whisper do reach the model
+    useEngineStore.setState({ config: withControls({ instruction: cap('native', null) as never }) })
+    render(<Editor />)
+    expect(screen.getByRole('button', { name: 'Susurro' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Énfasis' })).toBeEnabled()
   })
 
   it('disables the tag buttons when markup interpretation is off', () => {

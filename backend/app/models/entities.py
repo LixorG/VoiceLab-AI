@@ -123,6 +123,28 @@ class CustomCheckpoint(TimestampMixin, table=True):
     notes: str | None = None
 
 
+class TrainingRun(TimestampMixin, table=True):
+    """A fine-tune of a voice profile. `id` is also the id of its job in the GPU queue."""
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    profile_id: str = Field(index=True)  # no FK: the run (and its model) outlive a deleted profile
+    engine: str = "qwen3tts"
+    base_variant: str  # base-1.7b | base-0.6b
+    name: str
+    status: str = "queued"  # queued | preparing | training | saving | evaluating | completed | failed | cancelled
+    progress: float = 0.0
+    message: str | None = None
+    params: dict[str, Any] | None = _json(default=None)  # epochs, learning rate, LoRA rank…
+    dataset: dict[str, Any] | None = _json(default=None)  # clips, minutes, held-out clips, reference used
+    history: list[dict[str, Any]] | None = _json(default=None)  # losses per epoch
+    evaluation: dict[str, Any] | None = _json(default=None)  # trained model vs normal cloning on held-out clips
+    checkpoint_id: str | None = None  # CustomCheckpoint published when it finishes
+    output_path: str | None = None
+    error_code: str | None = None
+    error_detail: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class PronunciationEntry(TimestampMixin, table=True):
     """User pronunciation dictionary: `term` is written as `replacement` before sending text to the engine."""
     id: str = Field(default_factory=_uuid, primary_key=True)

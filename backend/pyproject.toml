@@ -1,6 +1,6 @@
 [project]
 name = "voicelab-backend"
-version = "1.0.0"
+version = "1.1.0"
 description = "VoiceLab AI — backend local de clonación y generación de voz"
 requires-python = ">=3.11,<3.13"
 dependencies = [

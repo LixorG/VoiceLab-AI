@@ -5,23 +5,35 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { t } from '@/i18n/es'
+import { useEngineStore } from '@/stores/engine'
 import { useGenerationStore } from '@/stores/generation'
 import { useProfilesStore } from '@/stores/profiles'
 
 const tx = t.expression
 
-const SNIPPETS: { id: keyof typeof tx.tags; open: string; close?: string }[] = [
+/** Only tags that do something: [tono] is gone (no engine changes pitch from the text; that is Posprocesado). */
+const SNIPPETS: { id: keyof typeof tx.tags; open: string; close?: string; needs?: 'emotion' | 'instruction' }[] = [
   { id: 'pause', open: '[pausa:500ms]' },
+  { id: 'longPause', open: '[pausa:1s]' },
   { id: 'breath', open: '[respira]' },
-  { id: 'emphasis', open: '[énfasis]', close: '[/énfasis]' },
-  { id: 'whisper', open: '[susurro]', close: '[/susurro]' },
-  { id: 'emotion', open: '[emoción:feliz]', close: '[/emoción]' },
-  { id: 'pitch', open: '[tono:grave]', close: '[/tono]' },
+  { id: 'emotion', open: '[emoción:feliz]', close: '[/emoción]', needs: 'emotion' },
+  { id: 'emphasis', open: '[énfasis]', close: '[/énfasis]', needs: 'instruction' },
+  { id: 'whisper', open: '[susurro]', close: '[/susurro]', needs: 'instruction' },
 ]
 
 /** Buttons that wrap the current selection (or insert at the cursor) with SpeechMarkup tags. */
 export function MarkupToolbar({ textareaRef }: { textareaRef: RefObject<HTMLTextAreaElement | null> }) {
   const { text, setText, markup, setMarkup, normalize, setNormalize } = useGenerationStore()
+  const controls = useEngineStore((s) => s.config?.capabilities.controls)
+
+  /** A tag this engine cannot apply is shown disabled with the engine's own reason (never silently ignored). */
+  const unusable = (needs?: 'emotion' | 'instruction'): string | null => {
+    if (!needs || !controls) return null
+    // emphasis and whisper only reach a model that takes style instructions
+    const capability = controls[needs === 'emotion' ? 'emotion' : 'instruction']
+    const ok = needs === 'emotion' ? capability.source !== 'unavailable' : capability.source === 'native'
+    return ok ? null : tx.unavailableTag(capability.reason ?? '')
+  }
 
   const insert = (open: string, close?: string) => {
     const el = textareaRef.current
@@ -40,11 +52,23 @@ export function MarkupToolbar({ textareaRef }: { textareaRef: RefObject<HTMLText
 
   return (
     <div className="flex flex-wrap items-center gap-1" role="toolbar" aria-label={tx.insert}>
-      {SNIPPETS.map((s) => (
-        <Button key={s.id} type="button" size="sm" variant="outline" className="h-7 px-2 text-[11px]" disabled={!markup} onClick={() => insert(s.open, s.close)}>
-          {tx.tags[s.id]}
-        </Button>
-      ))}
+      {SNIPPETS.map((s) => {
+        const reason = unusable(s.needs)
+        return (
+          <Button
+            key={s.id}
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px]"
+            disabled={!markup || reason !== null}
+            title={reason ?? tx.tagHints[s.id]}
+            onClick={() => insert(s.open, s.close)}
+          >
+            {tx.tags[s.id]}
+          </Button>
+        )
+      })}
       <Tooltip>
         <TooltipTrigger asChild>
           <button type="button" aria-label={tx.help} className="text-muted-foreground hover:text-foreground">

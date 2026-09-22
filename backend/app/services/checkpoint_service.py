@@ -119,3 +119,7 @@ class CheckpointService:
         self.session.delete(row)
         self.session.commit()
         refresh_store(self.session)
+        # a voice trained in VoiceLab: its folder (several GB) goes with it, the run stays as history
+        from app.services.training_service import forget_trained_model
+
+        forget_trained_model(self.session, checkpoint_id)

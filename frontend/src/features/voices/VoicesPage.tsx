@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { ReferenceLibrary } from '@/features/voices/ReferenceLibrary'
+import { TrainingPanel } from '@/features/voices/TrainingPanel'
 import { t } from '@/i18n/es'
 import { formatDuration } from '@/lib/utils'
 import { profilesApi } from '@/services/profiles'
@@ -223,6 +224,7 @@ function ProfileDetail({ profile, onBack }: { profile: ProfileRead; onBack: () =
       </div>
 
       <ReferenceLibrary />
+      <TrainingPanel profile={profile} referencesSignature={signature} />
     </div>
   )
 }

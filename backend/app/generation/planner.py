@@ -200,6 +200,8 @@ def plan_generation(parsed: ParsedMarkup, caps: EngineCapabilities, engine_name:
                     default_emotion: str | None, intensity: int,
                     reference_emotions: set[str] | None = None) -> GenerationPlan:
     warnings = _Warnings()
+    for warning in parsed.warnings:  # ElevenLabs tags with no equivalent, reported by the parser
+        warnings.once(warning)
     controls = caps.controls
     emotion_src = controls[GenericControl.EMOTION].source
     pitch_src = controls[GenericControl.PITCH].source

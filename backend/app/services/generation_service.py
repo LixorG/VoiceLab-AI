@@ -739,5 +739,13 @@ def get_job_queue() -> AsyncioJobQueue:
     queue = AsyncioJobQueue()
     queue.register(JOB_KIND, run_generation_job)
     queue.register(MODEL_LOAD_JOB, run_model_load_job)
-    queue.on_finish = persist_job_outcome
+    from app.services.training_service import TRAINING_JOB, persist_training_outcome, run_training_job
+
+    queue.register(TRAINING_JOB, run_training_job)
+
+    def on_finish(state: JobState) -> None:
+        persist_job_outcome(state)
+        persist_training_outcome(state)
+
+    queue.on_finish = on_finish
     return queue

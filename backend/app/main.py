@@ -21,6 +21,7 @@ from app.engines.manager import get_model_manager
 from app.services.checkpoint_service import refresh_store
 from app.services.generation_service import get_job_queue, mark_interrupted_generations
 from app.services.resources_service import ResourcesService, idle_monitor
+from app.services.training_service import mark_interrupted_trainings
 from app.web import mount_frontend
 
 logger = logging.getLogger("voicelab")
@@ -38,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with Session(get_engine()) as session:
             refresh_store(session)  # custom checkpoints become engine variants
         mark_interrupted_generations()
+        mark_interrupted_trainings()
         queue = get_job_queue()
         await queue.start()
         monitor = asyncio.create_task(idle_monitor(ResourcesService(settings, get_model_manager(), get_asr_manager(),

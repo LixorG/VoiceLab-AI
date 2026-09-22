@@ -12,6 +12,7 @@ import { f5Config, f5Summary } from '@/test/engineFixtures'
 import type { ProfileRead } from '@/types/profiles'
 
 vi.mock('@/features/voices/ReferenceLibrary', () => ({ ReferenceLibrary: () => <div data-testid="library" /> }))
+vi.mock('@/features/voices/TrainingPanel', () => ({ TrainingPanel: () => <div data-testid="training" /> }))
 
 const profile = (over: Partial<ProfileRead> = {}): ProfileRead => ({
   id: 'p1',

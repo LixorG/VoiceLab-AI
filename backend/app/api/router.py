@@ -10,12 +10,14 @@ from app.api.routes import (
     projects,
     pronunciation,
     references,
+    script,
     system,
+    training,
     transcription,
     voices,
 )
 
 api_router = APIRouter(prefix="/api")
 for module in (system, models, voices, references, transcription, generation, experiments, jobs, library, projects,
-               pronunciation, audio):
+               pronunciation, script, training, audio):
     api_router.include_router(module.router)

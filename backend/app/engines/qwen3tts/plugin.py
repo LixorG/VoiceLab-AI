@@ -44,6 +44,7 @@ from app.engines.base import (
     random_seed,
 )
 from app.engines.common import hf_files_cached, prepare_hf_cache, reference_clip
+from app.engines.custom import CustomVariant, get_custom_variants, is_custom
 from app.engines.qwen3tts.streaming import CodeStreamer, decoder_of
 
 logger = logging.getLogger("voicelab.engines.qwen3")
@@ -87,6 +88,9 @@ _SENTENCES_NOTE = ("Al clonar, los textos con varias frases se generan frase a f
                    "largas entre párrafos). Medido con una voz real: en llamadas largas el modelo habla un 15 % más "
                    "deprisa, casi sin pausas y con la entonación más plana; frase a frase el ritmo y la entonación "
                    "quedan más cerca de la referencia, con el mismo WER y la misma similitud de voz.")
+TRAINED_DESCRIPTION = "Voz entrenada en VoiceLab con tus grabaciones. No necesita audio de referencia."
+_TRAINED_LANGUAGE_NOTE = ("Se entrenó sin indicar idioma, como la receta oficial: «Auto» es lo más parecido al "
+                          "entrenamiento; indicar el idioma también funciona.")
 MAX_CHARS_PER_CALL = 300  # long single calls are very slow (cost grows with length) and can loop without ending
 CHARS_PER_SECOND = 14.0  # typical speech rate, only used to estimate progress and a runaway limit
 RUNAWAY_FACTOR = 3.0
@@ -118,6 +122,22 @@ class Qwen3TTSBackend(TTSBackend):
         self._prompt_lock = threading.Lock()
 
     def variants(self) -> list[EngineVariant]:
+        """Official variants plus the voices trained in VoiceLab (see app/training): each one is a complete
+        custom_voice model on disk with a single speaker."""
+        trained = [EngineVariant(id=v.id, label=v.name, description=v.notes or TRAINED_DESCRIPTION,
+                                 mode="custom_voice", source="custom", base_variant=v.base_variant,
+                                 languages=v.languages or None, vram_estimate_mb=self._base_vram(v.base_variant))
+                   for v in get_custom_variants().for_engine(self.id)]
+        return [*self.builtin_variants(), *trained]
+
+    def _base_vram(self, base_variant: str) -> int | None:
+        return next((v.vram_estimate_mb for v in self.builtin_variants() if v.id == base_variant), None)
+
+    def _trained(self, variant: str | None) -> CustomVariant | None:
+        v = self.variant(variant)
+        return get_custom_variants().get(self.id, v.id) if is_custom(v.id) else None
+
+    def builtin_variants(self) -> list[EngineVariant]:
         return [
             EngineVariant(id="base-1.7b", label="Clonación · 1.7B", mode="clone",
                           description="Clona una voz a partir de audio de referencia. Mayor calidad.",
@@ -194,6 +214,36 @@ class Qwen3TTSBackend(TTSBackend):
                        _SENTENCES_NOTE, _SAMPLING_NOTE, _PROGRESS_NOTE, _SPEED_NOTE],
             )
 
+        if v.source == "custom":
+            untrained = ("La voz entrenada solo aprendió a hablar como tus grabaciones: no se entrenó con "
+                         "instrucciones de estilo.")
+            controls = {
+                **common,
+                GenericControl.SPEED: ControlCapability(
+                    source=ControlSource.DSP,
+                    reason="El modelo no tiene control de velocidad. Se puede ajustar en «Posprocesado» (opcional; "
+                           "puede restar naturalidad)."),
+                GenericControl.PITCH: ControlCapability(
+                    source=ControlSource.DSP,
+                    reason="El modelo no controla el tono. Se puede ajustar en «Posprocesado» (opcional)."),
+                GenericControl.EMOTION: ControlCapability(source=ControlSource.UNAVAILABLE, reason=untrained),
+                GenericControl.INSTRUCTION: ControlCapability(source=ControlSource.UNAVAILABLE, reason=untrained),
+                GenericControl.NATURALNESS: ControlCapability(
+                    source=ControlSource.UNAVAILABLE,
+                    reason="No existe un parámetro de naturalidad. La temperatura cambia la variabilidad."),
+                GenericControl.VOICE_COLOR: ControlCapability(
+                    source=ControlSource.UNAVAILABLE, reason="El timbre es el de la voz entrenada."),
+            }
+            return EngineCapabilities(
+                variant=v.id, mode="custom_voice", sample_rate=QWEN_SAMPLE_RATE,
+                languages=[code for code, _ in LANGUAGE_OPTIONS if code != "Auto"],
+                requires_reference_audio=False, requires_reference_text=False, reference_strategies=[],
+                controls=controls, supports_streaming=True, supports_batch=True, reports_progress=True,
+                max_chars_per_call=MAX_CHARS_PER_CALL,
+                notes=["Voz entrenada en VoiceLab con tus grabaciones: no usa audio de referencia al generar.",
+                       _TRAINED_LANGUAGE_NOTE, _SAMPLING_NOTE, _PROGRESS_NOTE, _SPEED_NOTE],
+            )
+
         by_instruction = "Se pide dentro de la instrucción de estilo; el resultado no es un valor exacto."
         controls = {
             **common,
@@ -244,7 +294,7 @@ class Qwen3TTSBackend(TTSBackend):
                              "ICL aprovecha audio y texto; el embedding solo captura rasgos generales del hablante.",
                              "ICL necesita una transcripción exacta de la referencia.",
                              "Audio + transcripción (ICL)")))
-        if v.mode == "custom_voice":
+        if v.mode == "custom_voice" and v.source != "custom":
             specs.append(ParameterSpec(
                 id="speaker", maps_to="speaker", type="select", value_type="str", label="Voz",
                 default="Vivian", group="basic", dynamic_options=True,
@@ -254,7 +304,7 @@ class Qwen3TTSBackend(TTSBackend):
                              "Cada voz es nativa de un idioma (ver descripción), aunque todas pueden hablar "
                              "los 10 idiomas.",
                              "Sin coste.", "Una voz nativa del idioma del texto")))
-        if v.mode in ("custom_voice", "voice_design"):
+        if v.mode in ("custom_voice", "voice_design") and v.source != "custom":
             design = v.mode == "voice_design"
             specs.append(ParameterSpec(
                 id="instruct", maps_to="instruct", type="text", value_type="str",
@@ -343,11 +393,20 @@ class Qwen3TTSBackend(TTSBackend):
     def weights_installed(self, variant: str) -> bool:
         if not self.is_installed():
             return False
+        trained = self._trained(variant)
+        if trained is not None:
+            path = trained.resolved_path()
+            return path is not None and all((path / f).is_file() for f in REQUIRED_FILES)
         return hf_files_cached(self.variant(variant).repo_id or "", REQUIRED_FILES)
 
     def download_weights(self, variant: str) -> None:
         from huggingface_hub import snapshot_download
 
+        trained = self._trained(variant)
+        if trained is not None:
+            raise AppError(ErrorCode.MODEL_NOT_INSTALLED, status_code=409,
+                           message="Los archivos de la voz entrenada ya no están en su carpeta y no se pueden "
+                                   "descargar: vuelve a entrenarla.", details={"ruta": trained.local_path})
         prepare_hf_cache()
         snapshot_download(repo_id=self.variant(variant).repo_id)
 
@@ -368,7 +427,9 @@ class Qwen3TTSBackend(TTSBackend):
 
         from app.core.config import get_settings
 
-        path = snapshot_download(repo_id=v.repo_id, local_files_only=True)
+        trained = self._trained(v.id)
+        path = str(trained.resolved_path()) if trained else snapshot_download(repo_id=v.repo_id,
+                                                                             local_files_only=True)
         if device == "cuda":
             torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
             device_map = "cuda:0"
@@ -500,6 +561,13 @@ class Qwen3TTSBackend(TTSBackend):
             prefix = getattr(item, "ref_code", None) if getattr(item, "icl_mode", False) else None
             wavs, sr = run(self._model.generate_voice_clone, prefix=prefix, text=request.text,
                            language=params["language"], voice_clone_prompt=prompt)
+        elif v.mode == "custom_voice" and v.source == "custom":
+            speaker = next(iter(self._model.get_supported_speakers() or []), None)
+            if speaker is None:
+                raise AppError(ErrorCode.MODEL_LOAD_ERROR, status_code=500,
+                               message="La voz entrenada no tiene hablante definido: vuelve a entrenarla.")
+            wavs, sr = run(self._model.generate_custom_voice, text=request.text, speaker=speaker,
+                           language=params["language"])
         elif v.mode == "custom_voice":
             wavs, sr = run(self._model.generate_custom_voice, text=request.text, speaker=params["speaker"],
                            language=params["language"], instruct=params["instruct"] or None)

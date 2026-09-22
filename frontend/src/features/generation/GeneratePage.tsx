@@ -9,6 +9,7 @@ import { GenerationList } from '@/features/generation/GenerationList'
 import { MarkupToolbar, PlanPreview } from '@/features/generation/MarkupTools'
 import { ParamsClipboardBar } from '@/features/generation/ParamsClipboard'
 import { BatchPanel, QueuePanel } from '@/features/generation/QueuePanel'
+import { ScriptPrep } from '@/features/generation/ScriptPrep'
 import { generationBlockers } from '@/features/generation/readiness'
 import { EngineSettingsPanel } from '@/features/models/EngineSettingsPanel'
 import { PostProcessPanel } from '@/features/postprocess/PostProcessPanel'
@@ -81,6 +82,7 @@ export function GeneratePage() {
                 aria-label={t.generate.text}
                 maxLength={5000}
               />
+              <ScriptPrep />
               <PlanPreview />
             </CardContent>
           </Card>

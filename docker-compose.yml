@@ -7,7 +7,7 @@ services:
       args:
         TORCH_INDEX: https://download.pytorch.org/whl/cpu
         ENGINE_EXTRAS: audio,asr,f5tts,qwen3tts
-    image: voicelab-ai:1.0.0-cpu
+    image: voicelab-ai:1.1.0-cpu
     env_file:
       - path: .env
         required: false

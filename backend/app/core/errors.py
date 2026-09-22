@@ -58,6 +58,10 @@ class ErrorCode(StrEnum):
     EVALUATION_UNAVAILABLE = "EVALUATION_UNAVAILABLE"
     JOB_NOT_FOUND = "JOB_NOT_FOUND"
     JOB_CANCELLED = "JOB_CANCELLED"
+    TRAINING_NOT_FOUND = "TRAINING_NOT_FOUND"
+    TRAINING_DATA_INSUFFICIENT = "TRAINING_DATA_INSUFFICIENT"
+    TRAINING_BUSY = "TRAINING_BUSY"
+    TRAINING_FAILED = "TRAINING_FAILED"
 
 
 MESSAGES: dict[ErrorCode, str] = {
@@ -94,6 +98,10 @@ MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.PROJECT_NOT_READY: "Faltan segmentos por generar (o su audio está desactualizado) para exportar el proyecto.",
     ErrorCode.EXPORT_ERROR: "No se pudo exportar el audio en ese formato.",
     ErrorCode.CHECKPOINT_NOT_FOUND: "El checkpoint personalizado solicitado no existe.",
+    ErrorCode.TRAINING_NOT_FOUND: "El entrenamiento solicitado no existe.",
+    ErrorCode.TRAINING_DATA_INSUFFICIENT: "No hay suficiente audio transcrito de esta voz para entrenar.",
+    ErrorCode.TRAINING_BUSY: "Ya hay un entrenamiento en curso o en cola. Espera a que termine o cancélalo.",
+    ErrorCode.TRAINING_FAILED: "El entrenamiento falló. Revisa el detalle e inténtalo de nuevo.",
     ErrorCode.PRONUNCIATION_NOT_FOUND: "La entrada del diccionario de pronunciación no existe.",
     ErrorCode.JOB_INTERRUPTED: "La tarea se interrumpió porque el servidor se cerró o se reinició. Vuelve a lanzarla.",
     ErrorCode.MODEL_BUSY: "El modelo se está usando en una generación. Espera a que termine o cancélala.",
