@@ -16,15 +16,16 @@ La interfaz está en español; el texto que generes puede estar en cualquier idi
 2. [Qué necesitas](#qué-necesitas)
 3. [Instalación](#instalación)
 4. [Primeros pasos (5 minutos)](#primeros-pasos-5-minutos)
-5. [Las secciones de la aplicación](#las-secciones-de-la-aplicación)
-6. [Trucos para que suene mejor](#trucos-para-que-suene-mejor)
-7. [Marcas que entiende el texto](#marcas-que-entiende-el-texto)
-8. [Motores de voz](#motores-de-voz)
-9. [Dónde se guardan tus cosas](#dónde-se-guardan-tus-cosas)
-10. [Ajustes opcionales](#ajustes-opcionales)
-11. [Problemas frecuentes](#problemas-frecuentes)
-12. [Para desarrolladores](#para-desarrolladores)
-13. [Licencias y uso responsable](#licencias-y-uso-responsable)
+5. [Generar desde la terminal](#generar-desde-la-terminal)
+6. [Las secciones de la aplicación](#las-secciones-de-la-aplicación)
+7. [Trucos para que suene mejor](#trucos-para-que-suene-mejor)
+8. [Marcas que entiende el texto](#marcas-que-entiende-el-texto)
+9. [Motores de voz](#motores-de-voz)
+10. [Dónde se guardan tus cosas](#dónde-se-guardan-tus-cosas)
+11. [Ajustes opcionales](#ajustes-opcionales)
+12. [Problemas frecuentes](#problemas-frecuentes)
+13. [Para desarrolladores](#para-desarrolladores)
+14. [Licencias y uso responsable](#licencias-y-uso-responsable)
 
 ---
 
@@ -149,6 +150,33 @@ Los scripts de Linux/macOS y las imágenes de Docker están escritos pero no pro
 
 La barra lateral tiene dos modos: **Sencillo** (lo imprescindible) y **Avanzado** (todos los parámetros). Empieza en
 Sencillo.
+
+---
+
+## Generar desde la terminal
+
+Lo mismo que hace la aplicación, sin abrirla, para automatizar (un script que lee una lista de frases, un flujo de
+vídeo, un lote de noche). Lo que generes aparece igual en la Biblioteca.
+
+```bash
+backend\.venv\Scripts\python -m app.cli speak "Hola a todos" --voice "Hanna Miller" --out hola.wav
+backend\.venv\Scripts\python -m app.cli speak --file guion.txt --engine qwen3tts --takes 3 --format mp3
+backend\.venv\Scripts\python -m app.cli voices     # tus voces
+backend\.venv\Scripts\python -m app.cli engines    # motores y variantes, y si están listos
+```
+
+| Opción | Para qué |
+|---|---|
+| `--voice`, `--reference` | La voz (por nombre o identificador) y, si quieres, una grabación concreta |
+| `--engine`, `--variant` | Motor y variante; si no lo dices, los que tengas guardados para esa voz |
+| `--param nombre=valor` | Cualquier parámetro real del motor; se puede repetir (`--param speed=1.1`) |
+| `--seed`, `--takes` | Semilla exacta y cuántas tomas por frase (se queda con la mejor) |
+| `--emotion`, `--intensity` | Emoción global, si el motor la admite |
+| `--format`, `--out` | wav, mp3, ogg o flac, y dónde guardarlo |
+| `--json`, `--quiet` | Una línea JSON con el resultado para scripts, o sin mensajes |
+
+Cierra la aplicación mientras lo usas: los dos procesos cargarían el modelo en la misma tarjeta gráfica (la propia
+orden te avisa si la detecta abierta).
 
 ---
 

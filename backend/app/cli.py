@@ -5,6 +5,8 @@
     python -m app.cli download qwen3tts --variant base-0.6b
     python -m app.cli download asr           # Whisper model for transcription
     python -m app.cli version
+    python -m app.cli speak "Hola" --voice "Hanna Miller" --out hola.wav   # ver app/cli_speak.py
+    python -m app.cli voices | engines
 """
 
 from __future__ import annotations
@@ -98,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
     download.add_argument("target", help="f5tts | e2tts | qwen3tts | asr")
     download.add_argument("--variant", default=None, help="Variante del motor (por defecto, la recomendada)")
     download.set_defaults(func=cmd_download)
+    from app.cli_speak import register as register_speak
+
+    register_speak(sub)
     sub.add_parser("version", help="Mostrar la versión").set_defaults(func=lambda _: _print(__version__) or 0)
     args = parser.parse_args(argv)
     return args.func(args)

@@ -1,5 +1,5 @@
 import { Download, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,22 +30,30 @@ export function SpeakerModelCard() {
   const [status, setStatus] = useState<SpeakerModelStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let active = true
-    const tick = () =>
+  const alive = useRef(true)
+  const read = useCallback(
+    () =>
       api
         .status()
-        .then((s) => active && setStatus(s))
-        .catch((err) => active && setError(err instanceof ApiError ? err.message : String(err)))
-    void tick()
-    const timer = window.setInterval(() => {
-      if (status?.download_state === 'downloading') void tick()
-    }, POLL_MS)
+        .then((s) => alive.current && setStatus(s))
+        .catch((err) => alive.current && setError(err instanceof ApiError ? err.message : String(err))),
+    [],
+  )
+
+  useEffect(() => {
+    alive.current = true
+    void read()
     return () => {
-      active = false
-      window.clearInterval(timer)
+      alive.current = false
     }
-  }, [status?.download_state])
+  }, [read])
+
+  // Only while it downloads: asking again on every state change would undo what the download button just showed.
+  useEffect(() => {
+    if (status?.download_state !== 'downloading') return
+    const timer = window.setInterval(() => void read(), POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [status?.download_state, read])
 
   const download = async () => {
     setError(null)

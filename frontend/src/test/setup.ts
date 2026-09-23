@@ -4,7 +4,7 @@ import { afterEach } from 'vitest'
 
 // The default second of findBy*/waitFor is short for this machine: with the whole suite running in parallel a
 // lazy section or a fetch can take longer and the test fails without anything being broken.
-configure({ asyncUtilTimeout: 5_000 })
+configure({ asyncUtilTimeout: 10_000 })
 
 afterEach(() => cleanup())
 
