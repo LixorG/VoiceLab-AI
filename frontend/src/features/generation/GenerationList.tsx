@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { LivePlayer } from '@/features/audio/LivePlayer'
 import { BestTakeReport } from '@/features/generation/BestTakePanel'
 import { CopyParamsButton } from '@/features/generation/ParamsClipboard'
+import { SentenceList } from '@/features/generation/SentenceEditor'
 import { SyncedPlayers } from '@/features/audio/SyncedPlayers'
 import { ComparisonTable } from '@/features/comparison/ComparisonTable'
 import { GenerationMastering } from '@/features/postprocess/GenerationMastering'
@@ -91,20 +92,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
           <button type="button" className="text-muted-foreground underline-offset-2 hover:underline" onClick={() => setShowSegments((v) => !v)} aria-expanded={showSegments}>
             {tg.segments(gen.segments.length)} · {tg.showSegments}
           </button>
-          {showSegments && (
-            <ol className="mt-1 space-y-0.5">
-              {gen.segments.map((s) => (
-                <li key={s.index} className="flex flex-wrap gap-1.5 text-muted-foreground">
-                  <span className="font-mono">{s.index + 1}.</span>
-                  <span className="text-foreground">{s.text}</span>
-                  {s.emotion && <Badge variant="accent">{s.emotion}</Badge>}
-                  {s.reference_name && <span>· {s.reference_name}</span>}
-                  {s.seed != null && <span className="font-mono">· {tg.seed} {s.seed}</span>}
-                  {s.pause_after_ms > 0 && <span>· {t.expression.pauseAfter(s.pause_after_ms)}</span>}
-                </li>
-              ))}
-            </ol>
-          )}
+          {showSegments && <SentenceList gen={gen} />}
         </div>
       )}
 

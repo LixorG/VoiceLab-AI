@@ -556,7 +556,7 @@ class GenerationService:
                                           start_s=snap.get("start_s"), end_s=snap.get("end_s"), text=snap["text"])
             if snap else None,
             duration_s=gen.duration_s,
-            audio_url=f"/api/generation/{gen.id}/audio?v={int(gen.updated_at.timestamp())}"
+            audio_url=f"/api/generation/{gen.id}/audio?v={int(gen.updated_at.timestamp() * 1000)}"
             if gen.status == JobStatus.COMPLETED else None,
             raw_audio_url=f"/api/generation/{gen.id}/audio?version=raw" if gen.status == JobStatus.COMPLETED else None,
             postprocess=GenerationPostProcess.model_validate(gen.postprocess) if gen.postprocess else None,
@@ -827,10 +827,14 @@ def get_job_queue() -> AsyncioJobQueue:
     from app.services.training_service import TRAINING_JOB, persist_training_outcome, run_training_job
 
     queue.register(TRAINING_JOB, run_training_job)
+    from app.services.resegment_service import SEGMENT_JOB, persist_segment_outcome, run_segment_job
+
+    queue.register(SEGMENT_JOB, run_segment_job)
 
     def on_finish(state: JobState) -> None:
         persist_job_outcome(state)
         persist_training_outcome(state)
+        persist_segment_outcome(state)
 
     queue.on_finish = on_finish
     return queue

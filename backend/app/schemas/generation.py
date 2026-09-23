@@ -76,6 +76,26 @@ class BatchCreate(GenerationCreate):
         return cleaned
 
 
+class SegmentRegenerate(BaseModel):
+    """Repeat one sentence of a finished generation; everything else stays as it was."""
+
+    text: str | None = Field(default=None, max_length=MAX_TEXT_CHARS,
+                             description="Texto corregido de la frase; vacío = el mismo de antes")
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1,
+                             description="Semilla concreta; vacío = una nueva al azar")
+    takes: int = Field(default=1, ge=1, le=5, description="Tomas de esa frase; con más de una se conserva la mejor")
+
+    @field_validator("text")
+    @classmethod
+    def _text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("El texto de la frase no puede estar vacío.")
+        return value
+
+
 class PlannedSegmentRead(BaseModel):
     index: int
     text: str

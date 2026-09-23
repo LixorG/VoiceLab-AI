@@ -5,7 +5,7 @@ import { type GenerationRequest, generationApi, subscribeToJob } from '@/service
 import { t } from '@/i18n/es'
 import { keyOf, useEngineStore } from '@/stores/engine'
 import { type CopiedSettings, settingsFromGeneration } from '@/stores/paramsClipboard'
-import type { EngineRuntimeStatus, GenerationPlan, GenerationRead } from '@/types/generation'
+import type { EngineRuntimeStatus, GenerationPlan, GenerationRead, SegmentRegenerate } from '@/types/generation'
 import { DEFAULT_POSTPROCESS, type PostProcessCapabilities, type PostProcessConfig, isPostprocessActive } from '@/types/postprocess'
 import { TERMINAL_STATUSES } from '@/types/generation'
 
@@ -49,6 +49,8 @@ interface GenerationState {
   load: () => Promise<void>
   generate: (preview: boolean) => Promise<void>
   repeat: (generation: GenerationRead) => Promise<void>
+  /** Repeat one sentence of a finished generation; the rest of the audio is untouched. */
+  regenerateSegment: (id: string, index: number, body: SegmentRegenerate) => Promise<void>
   /** Apply copied settings (engine, variant, parameters, expression, post-processing); voice and text untouched. */
   applySettings: (settings: CopiedSettings) => Promise<ApplyReport>
   /** The current Generar settings, ready to copy. */
@@ -239,6 +241,17 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
         set({ error: messageOf(err) })
       } finally {
         set({ submitting: null })
+      }
+    },
+
+    regenerateSegment: async (id, index, body) => {
+      set({ error: null })
+      try {
+        const accepted = await generationApi.regenerateSegment(id, index, body)
+        upsert(accepted.generation)
+        track(accepted.generation)
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) })
       }
     },
 

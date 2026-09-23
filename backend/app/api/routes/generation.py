@@ -26,6 +26,7 @@ from app.schemas.generation import (
     GenerationCreate,
     GenerationPlanRead,
     GenerationRead,
+    SegmentRegenerate,
     VariationsCreate,
 )
 from app.schemas.library import FavoriteUpdate, LibraryItem, TagsUpdate
@@ -193,6 +194,26 @@ def set_tags(generation_id: str, body: TagsUpdate,
     from app.services.library_service import LibraryService
 
     return LibraryService(service.session, service).set_tags(generation_id, body.tags)
+
+
+@router.get("/{generation_id}/segments/{index}/audio", summary="Audio de una frase suelta")
+def segment_audio(generation_id: str, index: int = Path(ge=0, le=999),
+                  service: GenerationService = Depends(get_generation_service)) -> FileResponse:
+    from app.services.resegment_service import ResegmentService
+
+    path = ResegmentService(service).segment_audio(generation_id, index)
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/{generation_id}/segments/{index}/regenerate", response_model=GenerationAccepted, status_code=202,
+             summary="Repetir solo una frase (el resto del audio no cambia)")
+async def regenerate_segment(generation_id: str, body: SegmentRegenerate, index: int = Path(ge=0, le=999),
+                             service: GenerationService = Depends(get_generation_service)) -> GenerationAccepted:
+    from app.services.resegment_service import ResegmentService
+
+    gen = await ResegmentService(service).regenerate(generation_id, index, body)
+    return GenerationAccepted(generation=await service.to_read(gen), job_id=gen.id,
+                              queue_position=service.queue.queued_position(gen.id))
 
 
 @router.delete("/{generation_id}", status_code=204, summary="Eliminar generación")

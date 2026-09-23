@@ -28,6 +28,14 @@ export interface PlannedSegment {
   duration_s?: number | null
 }
 
+export interface SegmentRegenerate {
+  /** Corrected words for that sentence; omitted = the same ones. */
+  text?: string
+  /** A specific seed; omitted = a new one at random. */
+  seed?: number | null
+  takes?: number
+}
+
 export interface GenerationPlan {
   segments: PlannedSegment[]
   warnings: string[]
@@ -80,6 +88,7 @@ export interface GenerationRead {
     device?: string | null
     takes?: number
     best_take?: BestTake[]
+    regenerated?: { segment: number; seed: number | null; takes: number; at: string; best_take?: BestTake }[]
   } | null
   warnings: string[]
   expression: { emotion: string | null; intensity: number; markup: boolean; normalize?: boolean } | null

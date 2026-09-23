@@ -1,7 +1,7 @@
 import { request } from '@/services/api'
 import type { ParamValue } from '@/types/engines'
 import type { PostProcessCapabilities, PostProcessConfig } from '@/types/postprocess'
-import type { EngineRuntimeStatus, GenerationAccepted, GenerationPlan, GenerationRead, JobEvent } from '@/types/generation'
+import type { EngineRuntimeStatus, GenerationAccepted, GenerationPlan, GenerationRead, JobEvent, SegmentRegenerate } from '@/types/generation'
 
 export interface GenerationRequest {
   engine: string
@@ -36,6 +36,8 @@ export const generationApi = {
   list: (limit = 30) => request<GenerationRead[]>(`/generation?limit=${limit}`),
   get: (id: string) => request<GenerationRead>(`/generation/${id}`),
   remove: (id: string) => request<void>(`/generation/${id}`, { method: 'DELETE' }),
+  regenerateSegment: (id: string, index: number, body: SegmentRegenerate) =>
+    request<GenerationAccepted>(`/generation/${id}/segments/${index}/regenerate`, { method: 'POST', ...json(body) }),
   cancel: (jobId: string) => request<unknown>(`/jobs/${jobId}/cancel`, { method: 'POST' }),
   engineStatus: (engine: string, variant: string | null) =>
     request<EngineRuntimeStatus>(`/models/${engine}/status${variant ? `?variant=${encodeURIComponent(variant)}` : ''}`),
