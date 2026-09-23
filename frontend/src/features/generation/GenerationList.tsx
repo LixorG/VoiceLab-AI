@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { LivePlayer } from '@/features/audio/LivePlayer'
+import { BestTakeReport } from '@/features/generation/BestTakePanel'
 import { CopyParamsButton } from '@/features/generation/ParamsClipboard'
 import { SyncedPlayers } from '@/features/audio/SyncedPlayers'
 import { ComparisonTable } from '@/features/comparison/ComparisonTable'
@@ -82,6 +83,7 @@ function GenerationItem({ gen, variationIndex }: { gen: GenerationRead; variatio
         </p>
       )}
 
+      {gen.status === 'COMPLETED' && <BestTakeReport generation={gen} />}
       {gen.status === 'COMPLETED' && gen.audio_url && <GenerationMastering gen={gen} />}
 
       {gen.segments.length > 0 && (

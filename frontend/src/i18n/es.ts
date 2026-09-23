@@ -19,7 +19,13 @@ export const es = {
     simpleHint: 'Muestra solo los controles esenciales.',
     advancedHint: 'Muestra todos los parámetros que admite el motor seleccionado.',
   },
-  theme: { toggle: 'Cambiar tema claro/oscuro' },
+  theme: {
+    toggle: 'Cambiar entre modo claro y oscuro',
+    title: 'Apariencia',
+    options: { light: 'Claro', dark: 'Oscuro', system: 'Automático' } as Record<string, string>,
+    hint: 'Se guarda en este equipo y se aplica a toda la aplicación.',
+    systemHint: (current: string) => `Sigue al sistema: ahora está en ${current.toLowerCase()}.`,
+  },
   common: {
     close: 'Cerrar',
     retry: 'Reintentar',
@@ -787,6 +793,20 @@ export const es = {
     before: 'Antes',
     after: 'Después',
     peak: 'pico',
+  },
+  bestTake: {
+    title: 'Mejor toma automática',
+    offHint: 'Una toma por frase. Si alguna sale mal, se repite a mano.',
+    onHint: (n: number) =>
+      `${n} tomas de cada frase y se conserva la que mejor lee el texto (palabras y parecido de voz). Tarda unas ${n} veces más.`,
+    badge: (n: number) => `Mejor de ${n}`,
+    reportHint: 'Ver las tomas y por qué se eligió esta',
+    segment: (n: number) => `Frase ${n}`,
+    take: (n: number) => `Toma ${n}`,
+    werShort: (value: string) => `palabras mal ${value}`,
+    similarityShort: (value: string) => `voz ${value}`,
+    wer: 'Palabras distintas del texto pedido, según el reconocedor.',
+    similarity: 'Parecido con la referencia (1 = idéntica). Estimación automática.',
   },
   variations: {
     button: 'Generar variaciones',

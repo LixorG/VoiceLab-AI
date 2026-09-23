@@ -28,6 +28,7 @@ from app.core.database import get_engine
 from app.core.errors import AppError, ErrorCode
 from app.engines.base import SEED_MAX, ControlSource, EngineRequest, GenericControl, ReferenceInput, TTSBackend
 from app.engines.manager import ModelManager, get_model_manager
+from app.generation import best_take
 from app.generation.assembly import SegmentAudio, assemble, trim_edges
 from app.generation.markup import MarkupError, ParsedMarkup, Style, TextRun, parse
 from app.generation.planner import GenerationPlan, PlanError, plan_generation
@@ -92,6 +93,48 @@ class BuiltGeneration:
     warnings: list[str] = field(default_factory=list)
     text_changes: list[dict[str, str]] = field(default_factory=list)
     normalize_language: str | None = None
+
+
+def take_seeds(params: dict[str, Any], takes: int) -> list[int | None]:
+    """Seeds for the takes of one sentence: consecutive from the base seed, so the result can be repeated."""
+    base = params.get("seed")
+    if takes <= 1:
+        return [base]
+    if base is None:
+        return [None] * takes  # no fixed seed: the engine draws a different one for each take
+    return [(int(base) + i) % (SEED_MAX + 1) for i in range(takes)]
+
+
+def take_scorers(gen: Generation, settings: Settings, warnings: list[str]) -> tuple[Any, Any, Any]:
+    """(word-error evaluator, speaker encoder, reference embedding) — whatever is installed; None otherwise."""
+    from app.asr.manager import get_asr_manager
+    from app.evaluation.intelligibility import IntelligibilityEvaluator
+    from app.evaluation.speaker import get_speaker_encoder
+
+    asr = get_asr_manager()
+    evaluator = IntelligibilityEvaluator(asr) if asr.backend.package_available() and asr.backend.model_installed() \
+        else None
+    encoder = get_speaker_encoder()
+    reference = None
+    if encoder.model_installed():
+        snap = gen.reference_snapshot or {}
+        path = AudioStorage(settings.data_dir).processed_path(snap["sha256"]) if snap.get("sha256") else None
+        if path is not None and path.exists():
+            info = sf.info(path)
+            start = int((snap.get("start_s") or 0) * info.samplerate)
+            stop = int(snap["end_s"] * info.samplerate) if snap.get("end_s") is not None else None
+            audio, sr = sf.read(path, start=start, stop=stop, dtype="float32", always_2d=False)
+            reference = encoder.embed(np.asarray(audio).reshape(-1), sr)
+    else:
+        encoder = None
+    if evaluator is None and reference is None:
+        warnings.append("Para elegir la mejor toma no hay evaluadores instalados: se comparan solo la duración, el "
+                        "silencio y la saturación. Descarga el modelo de transcripción (y el de similitud de voz) en "
+                        "Configuración.")
+    elif evaluator is None:
+        warnings.append("El modelo de transcripción no está descargado: la mejor toma se elige por el parecido de "
+                        "voz y por duración, sin comprobar las palabras.")
+    return evaluator, encoder, reference
 
 
 def body_of_batch(body: BatchCreate, text: str, variant: str | None,
@@ -328,8 +371,10 @@ class GenerationService:
             experiment_id=experiment_id, label=label, project_id=project_id,
             reference_id=(first_ref or {}).get("reference_id"), profile_id=body.profile_id,
             reference_snapshot=first_ref, warnings=built.warnings,
+            takes=1 if body.preview or kind == "variation" else body.takes,
             expression={"emotion": body.emotion, "intensity": body.intensity, "markup": body.markup,
-                        "normalize": body.normalize, "text_changes": built.text_changes},
+                        "normalize": body.normalize, "text_changes": built.text_changes,
+                        "language": built.normalize_language},
             postprocess={"config": body.postprocess.model_dump()} if body.postprocess and body.postprocess.is_active
             else None,
         )
@@ -519,7 +564,7 @@ class GenerationService:
             evaluation={**gen.evaluation, "stale": gen.evaluation.get("output_path") != gen.output_path}
             if gen.evaluation else None,
             metrics=gen.metrics, warnings=gen.warnings or [], created_at=gen.created_at, updated_at=gen.updated_at,
-            expression=gen.expression, parent_id=gen.parent_id,
+            expression=gen.expression, takes=gen.takes or 1, parent_id=gen.parent_id,
             segments=[PlannedSegmentRead(index=s.index, text=s.text, emotion=s.emotion,
                                          emotion_via="instruction" if s.instruction and s.emotion else
                                          ("reference" if s.emotion else None),
@@ -593,7 +638,9 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                 return prepared_cache[snap["reference_id"]]
 
             stream = StreamWriter(mastering.generation_dir(settings, gen.id), ctx.chunk_ready)
-            engine_streams = _accepts_live_audio(engine, gen.variant)
+            takes = max(1, min(5, gen.takes or 1))
+            # with several takes the live preview would mix them: it plays the take that was kept
+            engine_streams = _accepts_live_audio(engine, gen.variant) and takes == 1
 
             def generate(request: EngineRequest, progress: Any) -> Any:
                 extra = {"on_audio": stream.write} if engine_streams else {}
@@ -604,15 +651,52 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
             gen_started = time.perf_counter()
             warnings = list(gen.warnings or [])
             details: dict[str, Any] = {}
+            language = (gen.expression or {}).get("language")
+            wer_eval, encoder, reference_embedding = take_scorers(gen, settings, warnings) if takes > 1 \
+                else (None, None, None)
+            chosen_takes: list[dict[str, Any]] = []
+
+            def best_of(request: EngineRequest, text: str, start: float, span: float,
+                        label: str, segment: int | None = None) -> tuple[Any, np.ndarray]:
+                """Generate `takes` readings of the same text and return the one that reads it best."""
+                seeds = take_seeds(request.params, takes)
+                attempts: list[tuple[Any, np.ndarray]] = []
+                scores: list[best_take.TakeScore] = []
+                for index, seed in enumerate(seeds):
+                    ctx.check_cancelled()
+                    params = dict(request.params)
+                    if seed is not None:
+                        params["seed"] = seed
+                    note = label if len(seeds) == 1 else f"{label} · toma {index + 1} de {len(seeds)}"
+                    result = generate(
+                        request.model_copy(update={"params": params}),
+                        lambda p, msg, i=index, n=note: ctx.update(
+                            JobStatus.GENERATING, start + span * (i + max(0.0, min(1.0, p))) / len(seeds),
+                            f"{n}" + (f": {msg}" if msg else "…")))
+                    audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                    score = best_take.measure(index, result.seed, audio, result.sample_rate)
+                    if len(seeds) > 1:
+                        if wer_eval is not None:
+                            best_take.add_wer(score, audio, result.sample_rate, text, language, wer_eval)
+                        if encoder is not None and reference_embedding is not None:
+                            best_take.add_similarity(score, audio, result.sample_rate, encoder, reference_embedding)
+                    attempts.append((result, audio))
+                    scores.append(score)
+                if len(scores) == 1:
+                    return attempts[0]
+                winner = best_take.rank(scores, best_take.expected_seconds(text))[0]
+                chosen_takes.append(best_take.summary(scores, winner, segment))
+                reason = best_take.reason(winner, scores)
+                if reason and reason not in warnings and segment in (None, 0):
+                    warnings.append(reason)
+                return attempts[winner.take]
 
             if not segments:
                 reference = prepared(gen.reference_snapshot)
                 phase(JobStatus.GENERATING, 0.15)
                 request = EngineRequest(variant=gen.variant or "", text=gen.text, params=gen.params or {},
                                         reference=reference)
-                result = generate(request, lambda p, msg: ctx.update(
-                    JobStatus.GENERATING, 0.15 + 0.8 * max(0.0, min(1.0, p)), msg))
-                audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                result, audio = best_of(request, gen.text, 0.15, 0.8, "Generando voz")
                 sample_rate, seed = result.sample_rate, result.seed
                 gen.params = {**(gen.params or {}), **result.effective_params}
                 warnings += [w for w in result.warnings if w not in warnings]
@@ -627,10 +711,8 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                     reference = prepared(seg.reference_snapshot)
                     request = EngineRequest(variant=gen.variant or "", text=seg.text, params=seg.params or {},
                                             reference=reference)
-                    result = generate(request, lambda p, msg, i=i: ctx.update(
-                        JobStatus.GENERATING, 0.15 + 0.8 * (i + max(0.0, min(1.0, p))) / n,
-                        f"Segmento {i + 1} de {n}" + (f": {msg}" if msg else "…")))
-                    seg_audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                    result, seg_audio = best_of(request, seg.text, 0.15 + 0.8 * i / n, 0.8 / n,
+                                                f"Segmento {i + 1} de {n}", segment=i)
                     if trim:
                         pause_before = segments[i - 1].pause_after_ms if i > 0 else seg.pause_before_ms
                         seg_audio = trim_edges(seg_audio, result.sample_rate, head=pause_before > 0,
@@ -651,6 +733,9 @@ def run_generation_job(spec: JobSpec, ctx: JobContext) -> dict:
                 audio, sample_rate = assemble(parts)
                 seed = gen.seed
                 details["segments"] = n
+            if takes > 1:
+                details["takes"] = takes
+                details["best_take"] = chosen_takes
             gen_elapsed = time.perf_counter() - gen_started
 
             phase(JobStatus.POST_PROCESSING, 0.96)

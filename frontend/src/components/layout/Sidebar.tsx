@@ -17,7 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { t } from '@/i18n/es'
 import { cn } from '@/lib/utils'
-import { type Section, type UiMode, useUiStore } from '@/stores/ui'
+import { type Section, type UiMode, resolveTheme, useUiStore } from '@/stores/ui'
 
 const NAV: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: 'generate', label: t.nav.generate, icon: AudioWaveform },
@@ -129,7 +129,7 @@ export function Sidebar() {
             aria-label={t.theme.toggle}
             className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            {resolveTheme(theme) === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>
           <button
             type="button"

@@ -3,7 +3,8 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 
 export type Section = 'generate' | 'library' | 'voices' | 'experiments' | 'projects' | 'models' | 'settings'
 export type UiMode = 'simple' | 'advanced'
-export type Theme = 'dark' | 'light'
+/** «system» follows the operating system's light/dark setting and changes with it. */
+export type Theme = 'dark' | 'light' | 'system'
 
 interface UiState {
   section: Section
@@ -12,6 +13,7 @@ interface UiState {
   sidebarCollapsed: boolean
   setSection: (section: Section) => void
   setMode: (mode: UiMode) => void
+  setTheme: (theme: Theme) => void
   toggleTheme: () => void
   toggleSidebar: () => void
 }
@@ -32,6 +34,12 @@ const safeStorage = createJSONStorage(() => {
   }
 })
 
+/** The palette actually painted: «system» asks the operating system (and follows it while it is selected). */
+export function resolveTheme(theme: Theme): 'dark' | 'light' {
+  if (theme !== 'system') return theme
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
@@ -41,7 +49,8 @@ export const useUiStore = create<UiState>()(
       sidebarCollapsed: false,
       setSection: (section) => set({ section }),
       setMode: (mode) => set({ mode }),
-      toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      setTheme: (theme) => set({ theme }),
+      toggleTheme: () => set((s) => ({ theme: resolveTheme(s.theme) === 'dark' ? 'light' : 'dark' })),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
     }),
     { name: 'voicelab-ui', storage: safeStorage },

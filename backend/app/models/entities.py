@@ -189,6 +189,7 @@ class Generation(TimestampMixin, table=True):
     reference_id: str | None = Field(default=None, index=True)  # no FK: generations outlive deleted references
     reference_snapshot: dict[str, Any] | None = _json(default=None)  # name, range and text actually used
     expression: dict[str, Any] | None = _json(default=None)  # emotion, intensity, markup flag requested
+    takes: int = 1  # takes generated per sentence; the best one is the audio that was kept
     kind: str = "single"  # single | preview | variation | experiment | script
     engine: str
     variant: str | None = None

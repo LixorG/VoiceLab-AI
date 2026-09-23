@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { AppearanceCard } from '@/features/settings/AppearanceCard'
 import { PronunciationCard } from '@/features/settings/PronunciationCard'
 import { SpeakerModelCard } from '@/features/settings/SpeakerModelCard'
 import { MemoryCard, StorageCard } from '@/features/settings/ResourcesPanel'
@@ -71,7 +72,8 @@ export function SettingsPage() {
           </div>
         )}
 
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
+          <AppearanceCard />
           <MemoryCard />
           <StorageCard />
         </div>

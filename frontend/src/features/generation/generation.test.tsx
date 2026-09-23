@@ -183,6 +183,7 @@ describe('generation store', () => {
       text: 'Hola mundo',
       params: { speed: 1.1, seed: null, nfe_steps: 24 },
       reference_id: 'r1',
+      takes: 1,
       profile_id: null,
       preview: true,
       emotion: null,

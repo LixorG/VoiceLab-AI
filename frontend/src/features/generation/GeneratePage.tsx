@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { GenerationList } from '@/features/generation/GenerationList'
 import { MarkupToolbar, PlanPreview } from '@/features/generation/MarkupTools'
 import { ParamsClipboardBar } from '@/features/generation/ParamsClipboard'
+import { BestTakeControl } from '@/features/generation/BestTakePanel'
 import { BatchPanel, QueuePanel } from '@/features/generation/QueuePanel'
 import { ScriptPrep } from '@/features/generation/ScriptPrep'
 import { generationBlockers } from '@/features/generation/readiness'
@@ -105,6 +106,7 @@ export function GeneratePage() {
         </div>
 
         <div className="space-y-2 border-t p-4">
+          <BestTakeControl />
           {blockers.length > 0 && (
             <div className="space-y-1 text-xs text-muted-foreground" aria-live="polite">
               <p className="font-medium text-foreground">{tg.blockersTitle}</p>

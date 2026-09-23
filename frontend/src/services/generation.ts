@@ -15,6 +15,7 @@ export interface GenerationRequest {
   intensity: number
   markup: boolean
   normalize?: boolean
+  takes?: number
   postprocess: PostProcessConfig | null
 }
 

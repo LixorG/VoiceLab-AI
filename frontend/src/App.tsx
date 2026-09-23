@@ -16,7 +16,7 @@ const ProjectsPage = lazy(() => import('@/features/projects/ProjectsPage').then(
 const ModelsPage = lazy(() => import('@/features/models/ModelsPage').then((m) => ({ default: m.ModelsPage })))
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 import { useSystemStore } from '@/stores/system'
-import { type Section, useUiStore } from '@/stores/ui'
+import { type Section, resolveTheme, useUiStore } from '@/stores/ui'
 
 function SectionView({ section }: { section: Section }) {
   switch (section) {
@@ -42,8 +42,19 @@ export default function App() {
   const theme = useUiStore((s) => s.theme)
   const { checkHealth, loadEnvironment } = useSystemStore()
 
+  // `color-scheme` makes the browser paint its own widgets (native selects, date pickers, scrollbars) to match.
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const resolved = resolveTheme(theme)
+      document.documentElement.classList.toggle('dark', resolved === 'dark')
+      document.documentElement.style.colorScheme = resolved
+    }
+    apply()
+    if (!media) return  // a browser (or test environment) without media queries: the chosen theme still applies
+    if (theme !== 'system') return
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
   }, [theme])
 
   useEffect(() => {

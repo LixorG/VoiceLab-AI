@@ -137,7 +137,7 @@ def test_segmentation_engine_switches_reference_by_emotion(client, engines, prof
     assert [s["seed"] for s in done["segments"]] == [100, 101, 102]
     assert [s["reference_name"] for s in done["segments"]] == ["neutral.wav", "feliz.wav", "neutral.wav"]
     assert done["expression"] == {"emotion": None, "intensity": 50, "markup": True, "normalize": True,
-                                 "text_changes": []}
+                                 "text_changes": [], "language": "es"}
     assert [r.text for r in seg_engine.prepared] == ["texto neutral", "texto feliz"]  # prepared once per reference
 
     audio = client.get(done["audio_url"])

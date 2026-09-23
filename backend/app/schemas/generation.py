@@ -24,6 +24,8 @@ class GenerationCreate(BaseModel):
     markup: bool = Field(default=True, description="Interpretar marcas como [pausa:500ms] o [emoción:feliz]")
     normalize: bool = Field(default=True, description="Escribir números, símbolos y abreviaturas como se leen y "
                                                        "aplicar el diccionario de pronunciación")
+    takes: int = Field(default=1, ge=1, le=5,
+                       description="Tomas por frase; con más de una se conserva automáticamente la mejor")
     postprocess: PostProcessConfig | None = Field(default=None,
                                                   description="Posprocesado opcional (desactivado por defecto)")
 
@@ -134,6 +136,7 @@ class GenerationRead(BaseModel):
     metrics: dict[str, Any] | None
     warnings: list[str]
     expression: dict[str, Any] | None = None
+    takes: int = 1
     parent_id: str | None = None
     segments: list[PlannedSegmentRead] = []
     postprocess: GenerationPostProcess | None = None

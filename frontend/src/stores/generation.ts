@@ -17,10 +17,12 @@ interface GenerationState {
   emotion: string | null
   intensity: number
   markup: boolean
+  takes: number
   normalize: boolean
   setEmotion: (emotion: string | null) => void
   setIntensity: (intensity: number) => void
   setMarkup: (markup: boolean) => void
+  setTakes: (takes: number) => void
   setNormalize: (normalize: boolean) => void
   plan: GenerationPlan | null
   planError: string | null
@@ -85,6 +87,7 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       intensity: s.intensity,
       markup: s.markup,
       normalize: s.normalize,
+      takes: preview ? 1 : s.takes,  // a preview is a quick listen: one take
       postprocess: isPostprocessActive(s.postprocess) ? s.postprocess : null,
     }
   }
@@ -137,10 +140,12 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
     emotion: null,
     intensity: 50,
     markup: true,
+    takes: 1,
     normalize: true,
     setEmotion: (emotion) => set({ emotion }),
     setIntensity: (intensity) => set({ intensity }),
     setMarkup: (markup) => set({ markup }),
+    setTakes: (takes) => set({ takes: Math.max(1, Math.min(5, takes)) }),
     setNormalize: (normalize) => set({ normalize }),
     plan: null,
     planError: null,

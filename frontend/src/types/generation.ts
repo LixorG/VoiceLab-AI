@@ -36,6 +36,24 @@ export interface GenerationPlan {
   normalize_language: string | null
 }
 
+export interface TakeScore {
+  take: number
+  seed: number | null
+  duration_s: number
+  speech_ratio: number
+  peak: number
+  wer: number | null
+  similarity: number | null
+  score: number
+  notes: string[]
+}
+
+export interface BestTake {
+  chosen: number
+  segment?: number
+  takes: TakeScore[]
+}
+
 export interface GenerationRead {
   id: string
   kind: 'single' | 'preview' | string
@@ -54,9 +72,18 @@ export interface GenerationRead {
   reference: { reference_id: string; name: string | null; start_s: number | null; end_s: number | null; text: string } | null
   duration_s: number | null
   audio_url: string | null
-  metrics: { model_load_s?: number; generation_s?: number; total_s?: number; rtf?: number | null; device?: string | null } | null
+  metrics: {
+    model_load_s?: number
+    generation_s?: number
+    total_s?: number
+    rtf?: number | null
+    device?: string | null
+    takes?: number
+    best_take?: BestTake[]
+  } | null
   warnings: string[]
   expression: { emotion: string | null; intensity: number; markup: boolean; normalize?: boolean } | null
+  takes?: number
   parent_id: string | null
   segments: PlannedSegment[]
   postprocess: { config: PostProcessConfig; report: PostProcessReport | null } | null
