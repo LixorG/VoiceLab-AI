@@ -76,9 +76,18 @@ export interface TrainingRun {
   finished_at: string | null
 }
 
+export type TrainableEngine = 'qwen3tts' | 'f5tts'
+
+/** Base checkpoints that can be fine-tuned, per engine (mirrors TRAINABLE in the backend). */
+export const TRAINABLE: Record<TrainableEngine, string[]> = {
+  qwen3tts: ['base-1.7b', 'base-0.6b'],
+  f5tts: ['F5TTS_v1_Base', 'F5TTS_Base'],
+}
+
 export interface TrainingInput {
   profile_id: string
-  base_variant: 'base-1.7b' | 'base-0.6b'
+  engine: TrainableEngine
+  base_variant: string
   name?: string | null
   epochs: number
 }

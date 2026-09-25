@@ -16,16 +16,17 @@ La interfaz está en español; el texto que generes puede estar en cualquier idi
 2. [Qué necesitas](#qué-necesitas)
 3. [Instalación](#instalación)
 4. [Primeros pasos (5 minutos)](#primeros-pasos-5-minutos)
-5. [Generar desde la terminal](#generar-desde-la-terminal)
-6. [Las secciones de la aplicación](#las-secciones-de-la-aplicación)
-7. [Trucos para que suene mejor](#trucos-para-que-suene-mejor)
-8. [Marcas que entiende el texto](#marcas-que-entiende-el-texto)
-9. [Motores de voz](#motores-de-voz)
-10. [Dónde se guardan tus cosas](#dónde-se-guardan-tus-cosas)
-11. [Ajustes opcionales](#ajustes-opcionales)
-12. [Problemas frecuentes](#problemas-frecuentes)
-13. [Para desarrolladores](#para-desarrolladores)
-14. [Licencias y uso responsable](#licencias-y-uso-responsable)
+5. [Diálogos a varias voces](#diálogos-a-varias-voces)
+6. [Generar desde la terminal](#generar-desde-la-terminal)
+7. [Las secciones de la aplicación](#las-secciones-de-la-aplicación)
+8. [Trucos para que suene mejor](#trucos-para-que-suene-mejor)
+9. [Marcas que entiende el texto](#marcas-que-entiende-el-texto)
+10. [Motores de voz](#motores-de-voz)
+11. [Dónde se guardan tus cosas](#dónde-se-guardan-tus-cosas)
+12. [Ajustes opcionales](#ajustes-opcionales)
+13. [Problemas frecuentes](#problemas-frecuentes)
+14. [Para desarrolladores](#para-desarrolladores)
+15. [Licencias y uso responsable](#licencias-y-uso-responsable)
 
 ---
 
@@ -49,6 +50,7 @@ La interfaz está en español; el texto que generes puede estar en cualquier idi
   el audio original del modelo nunca se toca y puedes comparar A/B.
 - **Compara motores y ajustes** en Experimentos, con reproductores sincronizados, tabla comparativa, valoración
   manual y estimaciones automáticas (palabras falladas y parecido de voz).
+- **Reparte un diálogo entre varias voces**: «Ana: …» / «Luis: …» y cada personaje habla con su voz.
 - **Organiza guiones largos** en Proyectos (un segmento por frase o párrafo, voz y pausa por segmento, exportación a
   WAV/ZIP y subtítulos SRT/VTT).
 - **Encuentra lo que generaste** en la Biblioteca: búsqueda por texto, filtros, favoritos, etiquetas y borrado
@@ -153,6 +155,26 @@ Sencillo.
 
 ---
 
+## Diálogos a varias voces
+
+Escribe el guion como se habla, una línea por intervención:
+
+```
+Ana: Hola, ¿qué tal el día?
+Luis: Muy bien, gracias por preguntar.
+Ana: Me alegro mucho.
+```
+
+En **Generar** aparecerá un panel con los personajes que ha encontrado; elige la voz de cada uno y genera. Cada turno
+se lee con su voz, con una pausa entre turnos (450 ms, ajustable), y los nombres **no** se leen en voz alta. Las
+líneas sin nombre siguen siendo del personaje anterior.
+
+Hasta 8 personajes. Todos comparten el motor y los parámetros —solo cambia la voz—, porque solo hay un modelo en la
+memoria de la tarjeta gráfica a la vez. Desde la terminal:
+`--speaker Ana=Hanna --speaker Luis=Carlos`.
+
+---
+
 ## Generar desde la terminal
 
 Lo mismo que hace la aplicación, sin abrirla, para automatizar (un script que lee una lista de frases, un flujo de
@@ -201,7 +223,10 @@ fecha, marca favoritos, pon tus propias etiquetas y borra varios audios a la vez
 Tus perfiles de voz: referencias (subidas o grabadas), cuál es la principal, referencias etiquetadas por emoción,
 transcripciones editables, configuración recomendada por motor, exportar/importar y **Entrenar esta voz**.
 
-El entrenamiento (LoRA sobre Qwen3-TTS) necesita al menos 5 minutos de grabaciones transcritas; lo ideal son 15–30.
+El entrenamiento (LoRA sobre Qwen3-TTS o F5-TTS) necesita al menos 5 minutos de grabaciones transcritas; lo ideal
+son 15–30. Con **Qwen3-TTS** la voz entrenada habla sola, sin referencia; con **F5-TTS** el resultado sigue clonando
+desde una referencia, pero ajustado a tu forma de hablar (medido con una voz real de 6 minutos: el parecido sube de
+0,91 a 0,93 y los errores de palabra del 6 % al 8 %; unos 2 minutos de GPU).
 Al terminar compara la voz entrenada con la clonación normal usando frases tuyas que no utilizó para entrenar. Ayuda
 sobre todo con voces con acento marcado; con voces muy estándar la clonación normal ya llega casi igual de lejos.
 

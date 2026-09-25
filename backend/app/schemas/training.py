@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Defaults measured on this machine (see app/training/qwen_lora.py and docs): LoRA rank 16, 10 epochs.
 DEFAULT_EPOCHS = 10
@@ -40,9 +40,17 @@ class TrainingDatasetRead(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+#: engine -> base checkpoints that can be fine-tuned (Qwen learns the voice; F5 keeps needing a reference).
+TRAINABLE: dict[str, list[str]] = {
+    "qwen3tts": ["base-1.7b", "base-0.6b"],
+    "f5tts": ["F5TTS_v1_Base", "F5TTS_Base"],
+}
+
+
 class TrainingCreate(BaseModel):
     profile_id: str
-    base_variant: Literal["base-1.7b", "base-0.6b"] = "base-1.7b"
+    engine: Literal["qwen3tts", "f5tts"] = "qwen3tts"
+    base_variant: str = "base-1.7b"
     name: str | None = Field(default=None, max_length=60, description="Nombre del modelo en el selector de variantes")
     epochs: int = Field(default=DEFAULT_EPOCHS, ge=1, le=50)
     learning_rate: float = Field(default=DEFAULT_LEARNING_RATE, gt=0, le=1e-3)
@@ -52,6 +60,14 @@ class TrainingCreate(BaseModel):
     def _strip(cls, value: str | None) -> str | None:
         value = (value or "").strip()
         return value or None
+
+    @model_validator(mode="after")
+    def _variant_of_engine(self) -> TrainingCreate:
+        allowed = TRAINABLE[self.engine]
+        if self.base_variant not in allowed:
+            raise ValueError(f"El modelo base {self.base_variant} no se puede entrenar con "
+                             f"{self.engine}. Opciones: {', '.join(allowed)}.")
+        return self
 
 
 class TrainingRunRead(BaseModel):

@@ -48,6 +48,11 @@ interface GenerationState {
   setReference: (id: string | null) => void
   load: () => Promise<void>
   generate: (preview: boolean) => Promise<void>
+  /** Dialogues: which voice says each character's lines, and the pause between turns. */
+  speakers: Record<string, string>
+  turnPauseMs: number
+  setSpeaker: (speaker: string, profileId: string | null) => void
+  setTurnPause: (ms: number) => void
   repeat: (generation: GenerationRead) => Promise<void>
   /** Repeat one sentence of a finished generation; the rest of the audio is untouched. */
   regenerateSegment: (id: string, index: number, body: SegmentRegenerate) => Promise<void>
@@ -90,6 +95,9 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
       markup: s.markup,
       normalize: s.normalize,
       takes: preview ? 1 : s.takes,  // a preview is a quick listen: one take
+      // only the characters the text still has: renaming one in the text must not keep generating the old voice
+      speakers: Object.fromEntries(Object.entries(s.speakers).filter(([name]) => (s.plan?.detected_speakers ?? []).includes(name))),
+      turn_pause_ms: s.turnPauseMs,
       postprocess: isPostprocessActive(s.postprocess) ? s.postprocess : null,
     }
   }
@@ -254,6 +262,17 @@ export const useGenerationStore = create<GenerationState>()((set, get) => {
         set({ error: error instanceof Error ? error.message : String(error) })
       }
     },
+
+    speakers: {},
+    turnPauseMs: 450,
+    setSpeaker: (speaker, profileId) =>
+      set((s) => {
+        const speakers = { ...s.speakers }
+        if (profileId) speakers[speaker] = profileId
+        else delete speakers[speaker]
+        return { speakers }
+      }),
+    setTurnPause: (ms) => set({ turnPauseMs: Math.max(0, Math.min(5000, ms)) }),
 
     repeat: async (generation) => {
       await get().applySettings(settingsFromGeneration(generation, generation.label ?? generation.engine))

@@ -12,7 +12,7 @@ import logging
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import lru_cache, partial
 from pathlib import Path
@@ -28,7 +28,7 @@ from app.core.database import get_engine
 from app.core.errors import AppError, ErrorCode
 from app.engines.base import SEED_MAX, ControlSource, EngineRequest, GenericControl, ReferenceInput, TTSBackend
 from app.engines.manager import ModelManager, get_model_manager
-from app.generation import best_take
+from app.generation import best_take, dialogue
 from app.generation.assembly import SegmentAudio, assemble, trim_edges
 from app.generation.markup import MarkupError, ParsedMarkup, Style, TextRun, parse
 from app.generation.planner import GenerationPlan, PlanError, plan_generation
@@ -79,6 +79,7 @@ class BuiltSegment:
     pause_before_ms: int
     pause_after_ms: int
     reference: dict | None
+    speaker: str | None = None  # dialogues: the label of the character who says this
 
 
 @dataclass
@@ -175,23 +176,7 @@ class GenerationService:
         caps = engine.capabilities(variant)
         needs_text = engine.requires_reference_text(params, variant)
         reference_id, scope_refs = self._reference_scope(body, caps.requires_reference_audio)
-
-        try:
-            parsed = parse(body.text) if body.markup else ParsedMarkup(events=[TextRun(body.text, Style())])
-        except MarkupError as exc:
-            raise AppError(ErrorCode.MARKUP_ERROR, status_code=422, message=exc.message,
-                           details={"posicion": exc.position, "etiqueta": exc.tag}) from exc
-
-        text_changes, normalize_language = self._normalize(parsed, body, params)
-        tagged = self._tagged_references(scope_refs, needs_text) if caps.requires_reference_audio else {}
-        try:
-            plan = plan_generation(parsed, caps, engine.display_name, body.emotion, body.intensity, set(tagged))
-        except PlanError as exc:
-            raise AppError(ErrorCode.VALIDATION_ERROR, status_code=422, message=str(exc)) from exc
-        if body.preview:
-            plan = self._preview_plan(plan)
-
-        warnings = list(plan.warnings)
+        warnings: list[str] = []
         snapshots: dict[str, dict] = {}
 
         def snapshot(ref_id: str | None) -> dict | None:
@@ -204,8 +189,49 @@ class GenerationService:
                 warnings.extend(w for w in ref_warnings if w not in warnings)
             return snapshots[key]
 
+        if not body.speakers and dialogue.looks_like_dialogue(body.text):
+            warnings.append("Este texto parece un diálogo. Asigna una voz a cada personaje o los nombres "
+                            "(«Ana:») se leerán en voz alta como parte del texto.")
+        if body.speakers:
+            segments, changes, language = self._dialogue_segments(body, engine, variant, params, caps, needs_text,
+                                                                  reference_id, scope_refs, warnings, snapshot)
+            segmented = True
+        else:
+            segments, changes, language, segmented = self._voice_segments(
+                body.text, body, engine, variant, params, caps, needs_text, reference_id, scope_refs, warnings,
+                snapshot)
+
+        if not segmented:
+            text = segments[0].text
+        else:
+            text = " ".join(s.text for s in segments) if body.preview else body.text
+        return BuiltGeneration(engine=engine, variant=variant, params=params, text=text, segments=segments,
+                               segmented=segmented,
+                               reference_id=reference_id if caps.requires_reference_audio else None,
+                               warnings=warnings, text_changes=changes, normalize_language=language)
+
+    def _voice_segments(self, text: str, body: GenerationCreate, engine: TTSBackend, variant: str,
+                        params: dict[str, Any], caps: Any, needs_text: bool, reference_id: str | None,
+                        scope_refs: list[ReferenceAudio], warnings: list[str],
+                        snapshot: Any) -> tuple[list[BuiltSegment], list[dict[str, str]], str | None, bool]:
+        """Markup -> plan -> segments for one text read by one voice (a whole generation, or one turn of a dialogue)."""
+        try:
+            parsed = parse(text) if body.markup else ParsedMarkup(events=[TextRun(text, Style())])
+        except MarkupError as exc:
+            raise AppError(ErrorCode.MARKUP_ERROR, status_code=422, message=exc.message,
+                           details={"posicion": exc.position, "etiqueta": exc.tag}) from exc
+
+        text_changes, normalize_language = self._normalize(parsed, body, params)
+        tagged = self._tagged_references(scope_refs, needs_text) if caps.requires_reference_audio else {}
+        try:
+            plan = plan_generation(parsed, caps, engine.display_name, body.emotion, body.intensity, set(tagged))
+        except PlanError as exc:
+            raise AppError(ErrorCode.VALIDATION_ERROR, status_code=422, message=str(exc)) from exc
+        if body.preview:
+            plan = self._preview_plan(plan)
+        warnings.extend(w for w in plan.warnings if w not in warnings)
+
         instruct_param = caps.controls[GenericControl.INSTRUCTION].parameter
-        segmented = not plan.is_simple
         segments: list[BuiltSegment] = []
         for seg in plan.segments:
             seg_params = dict(params)
@@ -219,15 +245,59 @@ class GenerationService:
                 index=seg.index, text=seg.text, params=seg_params, emotion=seg.emotion, emotion_via=seg.emotion_via,
                 instruction=seg.instruction, pause_before_ms=seg.pause_before_ms, pause_after_ms=seg.pause_after_ms,
                 reference=snapshot(ref_id)))
+        return segments, text_changes, normalize_language, not plan.is_simple
 
-        if not segmented:
-            text = segments[0].text
-        else:
-            text = " ".join(s.text for s in segments) if body.preview else body.text
-        return BuiltGeneration(engine=engine, variant=variant, params=params, text=text, segments=segments,
-                               segmented=segmented,
-                               reference_id=reference_id if caps.requires_reference_audio else None,
-                               warnings=warnings, text_changes=text_changes, normalize_language=normalize_language)
+    def _dialogue_segments(self, body: GenerationCreate, engine: TTSBackend, variant: str, params: dict[str, Any],
+                           caps: Any, needs_text: bool, reference_id: str | None,
+                           scope_refs: list[ReferenceAudio], warnings: list[str],
+                           snapshot: Any) -> tuple[list[BuiltSegment], list[dict[str, str]], str | None]:
+        """One turn at a time, each with its speaker's voice, joined by the turn pause."""
+        turns = dialogue.parse(body.text)
+        used = list(dict.fromkeys(t.speaker for t in turns if t.speaker))
+        unknown = [s for s in used if s not in body.speakers]
+        if unknown:
+            raise AppError(ErrorCode.VALIDATION_ERROR, status_code=422,
+                           message=f"Falta decir con qué voz habla {', '.join(unknown)}.",
+                           details={"personajes": unknown})
+        if not used:
+            raise AppError(ErrorCode.VALIDATION_ERROR, status_code=422,
+                           message="El texto no tiene ningún personaje: escribe «Nombre: lo que dice» "
+                                   "al principio de cada línea.")
+
+        segments: list[BuiltSegment] = []
+        changes: list[dict[str, str]] = []
+        language: str | None = None
+        voices = {speaker: self._speaker_reference(speaker, body.speakers[speaker], caps.requires_reference_audio)
+                  for speaker in used}
+        for position, turn in enumerate(turns):
+            ref_id, refs = voices.get(turn.speaker) or (reference_id, scope_refs)
+            part, turn_changes, turn_language, _ = self._voice_segments(
+                turn.text, body, engine, variant, params, caps, needs_text, ref_id, refs, warnings, snapshot)
+            changes.extend(c for c in turn_changes if c not in changes)
+            language = language or turn_language
+            for seg in part:
+                segments.append(replace(seg, index=len(segments), speaker=turn.speaker))
+            if position < len(turns) - 1 and segments:
+                last = segments[-1]
+                segments[-1] = replace(last, pause_after_ms=max(last.pause_after_ms, body.turn_pause_ms))
+            if body.preview:  # a preview is a quick listen: the first turn is enough
+                break
+        return segments, changes, language
+
+    def _speaker_reference(self, speaker: str, profile_id: str,
+                           needs_reference: bool) -> tuple[str | None, list[ReferenceAudio]]:
+        """The voice of one character: its generation reference and the references whose emotion tags it may use."""
+        from app.services.profile_service import ProfileService
+
+        profiles = ProfileService(self.session, self.settings, self.models.registry)
+        try:
+            profiles.get(profile_id)
+        except AppError as exc:
+            raise AppError(ErrorCode.NOT_FOUND, status_code=404,
+                           message=f"La voz elegida para {speaker} ya no existe.") from exc
+        reference_id = profiles.generation_reference_id(profile_id) if needs_reference else None
+        refs = list(self.session.exec(select(ReferenceAudio).where(ReferenceAudio.profile_id == profile_id)).all())
+        return reference_id, refs
 
     def _normalize(self, parsed: ParsedMarkup, body: GenerationCreate,
                    params: dict[str, Any]) -> tuple[list[dict[str, str]], str | None]:
@@ -350,11 +420,11 @@ class GenerationService:
         return GenerationPlanRead(
             segments=[PlannedSegmentRead(index=s.index, text=s.text, emotion=s.emotion, emotion_via=s.emotion_via,
                                          instruction=s.instruction, pause_before_ms=s.pause_before_ms,
-                                         pause_after_ms=s.pause_after_ms,
+                                         pause_after_ms=s.pause_after_ms, speaker=s.speaker,
                                          reference_name=(s.reference or {}).get("name"))
                       for s in built.segments],
             warnings=built.warnings, segmented=built.segmented, text_changes=built.text_changes,
-            normalize_language=built.normalize_language)
+            normalize_language=built.normalize_language, detected_speakers=dialogue.speakers(body.text))
 
     async def create(self, body: GenerationCreate, kind: str | None = None, parent_id: str | None = None,
                      experiment_id: str | None = None, label: str | None = None,
@@ -388,7 +458,8 @@ class GenerationService:
                 self.session.add(GenerationSegment(
                     generation_id=gen.id, index=seg.index, text=seg.text, engine=built.engine.id, params=seg_params,
                     seed=seg_params.get("seed"), emotion=seg.emotion, pause_before_ms=seg.pause_before_ms,
-                    pause_after_ms=seg.pause_after_ms, instruction=seg.instruction, reference_snapshot=seg.reference))
+                    pause_after_ms=seg.pause_after_ms, instruction=seg.instruction, speaker=seg.speaker,
+                    reference_snapshot=seg.reference))
         self.session.commit()
         self.session.refresh(gen)
         await self.queue.submit(JobSpec(kind=JOB_KIND, payload={"generation_id": gen.id}), job_id=gen.id)
@@ -570,7 +641,8 @@ class GenerationService:
                                          ("reference" if s.emotion else None),
                                          instruction=s.instruction, pause_before_ms=s.pause_before_ms,
                                          pause_after_ms=s.pause_after_ms,
-                                         reference_name=(s.reference_snapshot or {}).get("name"), seed=s.seed,
+                                         reference_name=(s.reference_snapshot or {}).get("name"),
+                                         speaker=s.speaker, seed=s.seed,
                                          duration_s=s.duration_s)
                       for s in segments],
         )

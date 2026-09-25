@@ -24,6 +24,8 @@ export interface PlannedSegment {
   pause_before_ms: number
   pause_after_ms: number
   reference_name: string | null
+  /** Dialogues: which character says this line. */
+  speaker?: string | null
   seed?: number | null
   duration_s?: number | null
 }
@@ -42,6 +44,8 @@ export interface GenerationPlan {
   segmented: boolean
   text_changes: TextChange[]
   normalize_language: string | null
+  /** Characters found in the text («Ana: …»), in the order they first speak. */
+  detected_speakers: string[]
 }
 
 export interface TakeScore {

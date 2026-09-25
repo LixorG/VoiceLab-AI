@@ -16,6 +16,9 @@ export interface GenerationRequest {
   markup: boolean
   normalize?: boolean
   takes?: number
+  /** Dialogues: character in the text -> voice profile id. */
+  speakers?: Record<string, string>
+  turn_pause_ms?: number
   postprocess: PostProcessConfig | null
 }
 

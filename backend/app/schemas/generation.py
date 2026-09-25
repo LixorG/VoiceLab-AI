@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.generation.dialogue import DEFAULT_TURN_PAUSE_MS, MAX_SPEAKERS
 from app.models.enums import JobStatus
 from app.postprocess.config import PostProcessConfig, PostProcessReport
 
@@ -26,6 +27,18 @@ class GenerationCreate(BaseModel):
                                                        "aplicar el diccionario de pronunciación")
     takes: int = Field(default=1, ge=1, le=5,
                        description="Tomas por frase; con más de una se conserva automáticamente la mejor")
+    speakers: dict[str, str] = Field(default_factory=dict,
+                                     description="Diálogo: personaje del texto («Ana: …») → id del perfil de voz")
+    turn_pause_ms: int = Field(default=DEFAULT_TURN_PAUSE_MS, ge=0, le=5000,
+                               description="Pausa entre turnos de un diálogo")
+
+    @field_validator("speakers")
+    @classmethod
+    def _speakers(cls, value: dict[str, str]) -> dict[str, str]:
+        cleaned = {k.strip(): v for k, v in value.items() if k.strip() and v}
+        if len(cleaned) > MAX_SPEAKERS:
+            raise ValueError(f"Un diálogo admite hasta {MAX_SPEAKERS} personajes.")
+        return cleaned
     postprocess: PostProcessConfig | None = Field(default=None,
                                                   description="Posprocesado opcional (desactivado por defecto)")
 
@@ -105,6 +118,7 @@ class PlannedSegmentRead(BaseModel):
     pause_before_ms: int
     pause_after_ms: int
     reference_name: str | None
+    speaker: str | None = None
     seed: int | None = None
     duration_s: float | None = None
 
@@ -120,6 +134,7 @@ class GenerationPlanRead(BaseModel):
     warnings: list[str]
     segmented: bool
     text_changes: list[TextChangeItem] = []
+    detected_speakers: list[str] = []
     normalize_language: str | None = None
 
 

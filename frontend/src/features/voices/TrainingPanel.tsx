@@ -12,9 +12,16 @@ import { transcriptionApi } from '@/services/transcription'
 import { useEngineStore } from '@/stores/engine'
 import { useUiStore } from '@/stores/ui'
 import type { ProfileRead } from '@/types/profiles'
-import { ACTIVE_TRAINING, type TrainingDataset, type TrainingRun } from '@/types/training'
+import { ACTIVE_TRAINING, TRAINABLE, type TrainableEngine, type TrainingDataset, type TrainingRun } from '@/types/training'
 
 const tt = t.training
+const BASE_LABELS: Record<string, string> = {
+  'base-1.7b': tt.base17,
+  'base-0.6b': tt.base06,
+  F5TTS_v1_Base: tt.baseF5v1,
+  F5TTS_Base: tt.baseF5,
+}
+
 const POLL_MS = 2000
 const messageOf = (err: unknown) => (err instanceof ApiError ? err.message : String(err))
 
@@ -198,7 +205,8 @@ function RunCard({ run, onChanged }: { run: TrainingRun; onChanged: () => void }
 export function TrainingPanel({ profile, referencesSignature }: { profile: ProfileRead; referencesSignature: string }) {
   const [data, setData] = useState<TrainingDataset | null>(null)
   const [runs, setRuns] = useState<TrainingRun[]>([])
-  const [base, setBase] = useState<'base-1.7b' | 'base-0.6b'>('base-1.7b')
+  const [engine, setEngine] = useState<TrainableEngine>('qwen3tts')
+  const [base, setBase] = useState<string>(TRAINABLE.qwen3tts[0])
   const [epochs, setEpochs] = useState(10)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -253,7 +261,7 @@ export function TrainingPanel({ profile, referencesSignature }: { profile: Profi
     setBusy(true)
     setError(null)
     try {
-      await trainingApi.start({ profile_id: profile.id, base_variant: base, epochs, name: name.trim() || null })
+      await trainingApi.start({ profile_id: profile.id, engine, base_variant: base, epochs, name: name.trim() || null })
       await reload()
     } catch (err) {
       setError(messageOf(err))
@@ -274,12 +282,31 @@ export function TrainingPanel({ profile, referencesSignature }: { profile: Profi
         <p className="text-sm text-muted-foreground">{tt.intro}</p>
         {data && <DatasetSummary data={data} onTranscribe={() => void transcribeMissing()} transcribing={transcribing} />}
 
-        <div className="grid gap-3 sm:grid-cols-[1.2fr_0.6fr_1.2fr_auto] sm:items-end">
+        <div className="grid gap-3 sm:grid-cols-[0.9fr_1.2fr_0.6fr_1.2fr_auto] sm:items-end">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            {tt.engine}
+            <select
+              value={engine}
+              aria-label={tt.engine}
+              onChange={(e) => {
+                const next = e.target.value as TrainableEngine
+                setEngine(next)
+                setBase(TRAINABLE[next][0])
+              }}
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm text-foreground"
+            >
+              <option value="qwen3tts">{tt.engineQwen}</option>
+              <option value="f5tts">{tt.engineF5}</option>
+            </select>
+          </label>
           <label className="space-y-1 text-xs text-muted-foreground">
             {tt.base}
-            <select value={base} onChange={(e) => setBase(e.target.value as typeof base)} className="h-9 w-full rounded-md border bg-background px-2 text-sm text-foreground">
-              <option value="base-1.7b">{tt.base17}</option>
-              <option value="base-0.6b">{tt.base06}</option>
+            <select value={base} aria-label={tt.base} onChange={(e) => setBase(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm text-foreground">
+              {TRAINABLE[engine].map((id) => (
+                <option key={id} value={id}>
+                  {BASE_LABELS[id] ?? id}
+                </option>
+              ))}
             </select>
           </label>
           <label className="space-y-1 text-xs text-muted-foreground" title={tt.epochsHint}>
@@ -295,6 +322,7 @@ export function TrainingPanel({ profile, referencesSignature }: { profile: Profi
             {busy ? tt.starting : tt.start}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">{tt.engineHint[engine]}</p>
         <p className="text-xs text-muted-foreground">{tt.gpuNote}</p>
         {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
 

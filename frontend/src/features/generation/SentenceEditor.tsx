@@ -40,6 +40,7 @@ function Sentence({ gen, segment, editable }: { gen: GenerationRead; segment: Pl
     <li className="space-y-1 rounded-md px-1.5 py-1 hover:bg-muted/40">
       <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
         <span className="font-mono">{segment.index + 1}.</span>
+        {segment.speaker && <Badge variant="accent">{segment.speaker}</Badge>}
         {!editing && <span className="text-foreground">{segment.text}</span>}
         {segment.emotion && <Badge variant="accent">{segment.emotion}</Badge>}
         {segment.reference_name && <span>· {segment.reference_name}</span>}

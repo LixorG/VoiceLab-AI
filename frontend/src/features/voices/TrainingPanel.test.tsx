@@ -89,8 +89,28 @@ describe('TrainingPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrenar' }))
     await waitFor(() => expect(screen.getByText('En cola')).toBeInTheDocument())
     const post = fetchMock.mock.calls.find(([url, init]) => url === '/api/training' && init?.method === 'POST')!
-    expect(JSON.parse(String(post[1].body))).toEqual({ profile_id: 'p1', base_variant: 'base-0.6b', epochs: 12, name: null })
+    expect(JSON.parse(String(post[1].body))).toEqual({ profile_id: 'p1', engine: 'qwen3tts', base_variant: 'base-0.6b', epochs: 12, name: null })
     expect(screen.getByRole('button', { name: 'Entrenar' })).toBeDisabled() // one training at a time
+  })
+
+  it('offers the base checkpoints of the chosen engine, and only those', async () => {
+    state.dataset = dataset({ missing_transcripts: [], ready: true, usable_minutes: 18 })
+    render(<TrainingPanel profile={profile} referencesSignature="" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Entrenar' })).toBeEnabled())
+
+    const base = screen.getByLabelText('Modelo base') as HTMLSelectElement
+    expect([...base.options].map((o) => o.value)).toEqual(['base-1.7b', 'base-0.6b'])
+    expect(screen.getByText(/no necesita audio de referencia/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Motor'), { target: { value: 'f5tts' } })
+    expect([...(screen.getByLabelText('Modelo base') as HTMLSelectElement).options].map((o) => o.value))
+      .toEqual(['F5TTS_v1_Base', 'F5TTS_Base'])
+    expect(screen.getByText(/sigue clonando desde una referencia/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Entrenar' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/training' && init?.method === 'POST')).toBe(true))
+    const post = fetchMock.mock.calls.find(([url, init]) => url === '/api/training' && init?.method === 'POST')!
+    expect(JSON.parse(String(post[1].body))).toMatchObject({ engine: 'f5tts', base_variant: 'F5TTS_v1_Base' })
   })
 
   it('shows progress and cancels a running training', async () => {

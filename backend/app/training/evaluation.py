@@ -62,13 +62,20 @@ def compare(session: Session, models: ModelManager, run: TrainingRun, trained_va
         sf.write(out_dir / f"{k}_real.wav", audio, SAMPLE_RATE, subtype="PCM_16")
     target = encoder.embed(np.concatenate(real), SAMPLE_RATE) if has_similarity else None
 
+    def clone_input() -> ReferenceInput:
+        return ReferenceInput(audio_path=reference.audio_path, text=reference.text,
+                              sha256=Path(reference.audio_path).stem, start_s=reference.start_s,
+                              end_s=reference.end_s)
+
     systems: dict[str, list[np.ndarray]] = {}
-    with models.use("qwen3tts", trained_variant) as engine:
-        systems["trained"] = [_generate(engine, trained_variant, c.text, k, None, cancel) for k, c in enumerate(held)]
-    with models.use("qwen3tts", run.base_variant) as engine:
-        prepared = engine.prepare_reference(ReferenceInput(
-            audio_path=reference.audio_path, text=reference.text, sha256=Path(reference.audio_path).stem,
-            start_s=reference.start_s, end_s=reference.end_s), run.base_variant)
+    with models.use(run.engine, trained_variant) as engine:
+        # a fine-tuned F5 still clones from a reference; a trained Qwen voice carries the speaker itself
+        prepared = (engine.prepare_reference(clone_input(), trained_variant)
+                    if engine.capabilities(trained_variant).requires_reference_audio else None)
+        systems["trained"] = [_generate(engine, trained_variant, c.text, k, prepared, cancel)
+                              for k, c in enumerate(held)]
+    with models.use(run.engine, run.base_variant) as engine:
+        prepared = engine.prepare_reference(clone_input(), run.base_variant)
         systems["normal"] = [_generate(engine, run.base_variant, c.text, k, prepared, cancel)
                              for k, c in enumerate(held)]
 

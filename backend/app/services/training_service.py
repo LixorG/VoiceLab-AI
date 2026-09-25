@@ -55,8 +55,10 @@ from app.workers.base import JobSpec
 logger = logging.getLogger("voicelab.training")
 
 TRAINING_JOB = "training"
-ENGINE = "qwen3tts"
+QWEN, F5 = "qwen3tts", "f5tts"
 BASE_REPOS = {"base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base"}
+#: F5/E2 are fine-tuned into a single checkpoint file, so the trained voice still clones from a reference.
+F5_REPO = "SWivid/F5-TTS"
 HELD_OUT = ((30, 4), (15, 2))  # (at least N usable clips, keep K out of training to compare afterwards)
 HELD_OUT_SECONDS = (3.0, 12.0)
 ACTIVE = ("queued", "preparing", "training", "saving", "evaluating")
@@ -207,13 +209,13 @@ class TrainingService:
         active = self.session.exec(select(TrainingRun).where(TrainingRun.status.in_(ACTIVE))).first()  # type: ignore[attr-defined]
         if active is not None:
             raise AppError(ErrorCode.TRAINING_BUSY, status_code=409, details={"entrenamiento": active.id})
-        engine = self.models.registry.get(ENGINE)
+        engine = self.models.registry.get(body.engine)
         if not engine.is_installed():
             raise AppError(ErrorCode.MODEL_NOT_INSTALLED, status_code=409,
                            details={"paquetes": list(engine.required_packages)})
         if not engine.weights_installed(body.base_variant):
             raise AppError(ErrorCode.MODEL_NOT_INSTALLED, status_code=409,
-                           message="Descarga primero los pesos del modelo base elegido (Modelos → Qwen3-TTS).",
+                           message="Descarga primero los pesos del modelo base elegido (sección Modelos).",
                            details={"variante": body.base_variant})
         if self.models.resolve_device() != "cuda":
             raise AppError(ErrorCode.GPU_NOT_AVAILABLE, status_code=409,
@@ -224,7 +226,7 @@ class TrainingService:
                            if summary.warnings else None,
                            details={"minutos": summary.usable_minutes, "minimo": MIN_MINUTES})
         name = body.name or f"{profile.name} (entrenada)"
-        run = TrainingRun(profile_id=profile.id, engine=ENGINE, base_variant=body.base_variant, name=name,
+        run = TrainingRun(profile_id=profile.id, engine=body.engine, base_variant=body.base_variant, name=name,
                           params={"epochs": body.epochs, "learning_rate": body.learning_rate, "lora_rank": 16,
                                   "lora_alpha": 16.0, "batch_size": 2, "grad_accumulation": 4},
                           dataset={"clips": summary.clips, "minutes": summary.usable_minutes},
@@ -265,10 +267,15 @@ def remove_model(session: Session, models: ModelManager, run: TrainingRun) -> No
 
 def _remove_folder(run: TrainingRun) -> None:
     run.checkpoint_id = None
-    if run.output_path:
-        path = Path(run.output_path)
-        if path.is_dir() and models_dir(get_settings()) in path.parents:
-            shutil.rmtree(path, ignore_errors=True)
+    if not run.output_path:
+        return
+    path = Path(run.output_path)
+    if models_dir(get_settings()) not in path.parents:
+        return
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)  # F5: the fine-tune is a single .safetensors file
 
 
 def forget_trained_model(session: Session, checkpoint_id: str) -> None:
@@ -298,14 +305,15 @@ def _reader(stream: Any, out: queue_mod.Queue) -> None:
     out.put(None)
 
 
-def _trainer_command(spec_path: Path) -> list[str]:
-    return [sys.executable, "-m", "app.training.qwen_lora", str(spec_path)]
+def _trainer_command(spec_path: Path, engine: str = QWEN) -> list[str]:
+    module = "app.training.f5_lora" if engine == F5 else "app.training.qwen_lora"
+    return [sys.executable, "-m", module, str(spec_path)]
 
 
-def run_trainer(spec_path: Path, ctx: JobContext, on_event: Any) -> dict:
+def run_trainer(spec_path: Path, ctx: JobContext, on_event: Any, engine: str = QWEN) -> dict:
     """Run the trainer process, forwarding its events; killing it if the job is cancelled."""
     backend_dir = PROJECT_ROOT / "backend"
-    proc = subprocess.Popen(_trainer_command(spec_path), cwd=str(backend_dir), stdout=subprocess.PIPE,
+    proc = subprocess.Popen(_trainer_command(spec_path, engine), cwd=str(backend_dir), stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     lines: queue_mod.Queue = queue_mod.Queue()
@@ -338,8 +346,8 @@ def run_trainer(spec_path: Path, ctx: JobContext, on_event: Any) -> dict:
     if last.get("event") == "error":
         oom = last.get("code") == "OUT_OF_MEMORY"
         raise AppError(ErrorCode.GPU_MEMORY_ERROR if oom else ErrorCode.TRAINING_FAILED, status_code=500,
-                       message="La GPU se quedó sin memoria al entrenar. Cierra otros programas que usen la GPU o "
-                               "elige el modelo base 0.6B." if oom else None,
+                       message="La GPU se quedó sin memoria al entrenar. Cierra otros programas que usen la GPU "
+                               "o elige un modelo base más pequeño." if oom else None,
                        details={"detalle": last.get("detail")})
     if last.get("event") != "done" or proc.returncode:
         tail = "".join(stderr)[-800:]
@@ -403,13 +411,19 @@ def _train(session: Session, settings: Settings, models: ModelManager, run: Trai
     def clip_spec(g: _RefClips, c: Clip) -> dict:
         return {"audio_path": str(g.path), "text": c.text, "start_s": c.start_s, "end_s": c.end_s}
 
-    trainer_spec = {
-        "base_model_path": snapshot_download(repo_id=BASE_REPOS[run.base_variant], local_files_only=True),
-        "output_dir": str(output), "speaker_name": "voicelab", "clips": [clip_spec(g, c) for g, c in train_clips],
-        "reference": clip_spec(ref_group, ref_clip), "epochs": params.get("epochs", 10),
-        "learning_rate": params.get("learning_rate", 1e-4), "batch_size": params.get("batch_size", 2),
-        "grad_accumulation": params.get("grad_accumulation", 4), "lora_rank": params.get("lora_rank", 16),
-        "lora_alpha": params.get("lora_alpha", 16.0)}
+    shared = {"clips": [clip_spec(g, c) for g, c in train_clips], "epochs": params.get("epochs", 10),
+              "learning_rate": params.get("learning_rate", 1e-4), "batch_size": params.get("batch_size", 2),
+              "grad_accumulation": params.get("grad_accumulation", 4), "lora_rank": params.get("lora_rank", 16),
+              "lora_alpha": params.get("lora_alpha", 16.0)}
+    if run.engine == F5:
+        trainer_spec = {**shared, "arch": run.base_variant, "output_path": f"{output}.safetensors",
+                        "base_ckpt": _f5_checkpoint(models, run.base_variant), "vocab_path": _f5_vocab()}
+        output = Path(f"{output}.safetensors")
+    else:
+        trainer_spec = {**shared, "speaker_name": "voicelab", "output_dir": str(output),
+                        "base_model_path": snapshot_download(repo_id=BASE_REPOS[run.base_variant],
+                                                             local_files_only=True),
+                        "reference": clip_spec(ref_group, ref_clip)}
     spec_path = run_dir / "spec.json"
     spec_path.write_text(json.dumps(trainer_spec, ensure_ascii=False, indent=2), encoding="utf-8")
     run.dataset = {**(run.dataset or {}), "clips": len(train_clips), "minutes": round(
@@ -428,12 +442,14 @@ def _train(session: Session, settings: Settings, models: ModelManager, run: Trai
     def on_event(event: dict) -> None:
         kind = event.get("event")
         if kind == "stage" and event.get("stage") in STAGE_PROGRESS:
+            if event.get("peak_vram_mb"):  # what the card actually needed, for the next run
+                run.dataset = {**(run.dataset or {}), "peak_vram_mb": event["peak_vram_mb"]}
             progress, status = STAGE_PROGRESS[event["stage"]]
             update(status, progress, event.get("message") or "")
         elif kind == "stage" and event.get("stage") == "train":
             update("training", 0.06, f"Entrenando con {event.get('clips')} frases…")
         elif kind == "epoch":
-            history.append({k: event[k] for k in ("epoch", "talker_loss", "predictor_loss") if k in event})
+            history.append({k: event[k] for k in ("epoch", "loss", "talker_loss", "predictor_loss") if k in event})
             run.history = list(history)
         elif kind == "progress" and time.monotonic() - last_write[0] > 2:
             last_write[0] = time.monotonic()
@@ -442,14 +458,17 @@ def _train(session: Session, settings: Settings, models: ModelManager, run: Trai
             eta_text = f" · quedan ~{max(1, round(eta / 60))} min" if eta else ""
             update("training", 0.06 + 0.84 * done, f"Época {event['epoch']} de {event['epochs']}{eta_text}")
 
-    result = run_trainer(spec_path, ctx, on_event)
+    result = run_trainer(spec_path, ctx, on_event, run.engine)
     run.history = result.get("history") or history
 
+    needs_reference = run.engine == F5
     checkpoint = CustomCheckpoint(
-        engine=ENGINE, name=run.name, slug=_free_slug(session, slugify(run.name)), base_variant=run.base_variant,
-        local_path=str(output), languages=None,
+        engine=run.engine, name=run.name, slug=_free_slug(session, slugify(run.name), run.engine),
+        base_variant=run.base_variant, local_path=str(output), languages=None,
         notes=f"Voz entrenada en VoiceLab con {run.dataset['minutes']:.1f} min de «{profile.name}» "
-              f"({params.get('epochs', 10)} épocas). No necesita audio de referencia.")
+              f"({params.get('epochs', 10)} épocas). "
+              + ("Sigue clonando desde una referencia de esa voz." if needs_reference
+                 else "No necesita audio de referencia."))
     session.add(checkpoint)
     session.commit()
     session.refresh(checkpoint)
@@ -473,8 +492,24 @@ def _train(session: Session, settings: Settings, models: ModelManager, run: Trai
     return {"run_id": run.id, "variant": variant_id(checkpoint.slug)}
 
 
-def _free_slug(session: Session, slug: str) -> str:
-    taken = {row.slug for row in session.exec(select(CustomCheckpoint).where(CustomCheckpoint.engine == ENGINE))}
+def _f5_checkpoint(models: ModelManager, variant: str) -> str:
+    """The official weights this fine-tune starts from (already downloaded: `start` checks it)."""
+    from huggingface_hub import hf_hub_download
+
+    engine = models.registry.get(F5)
+    _repo, filename = engine.checkpoints[variant]  # type: ignore[attr-defined]
+    return hf_hub_download(repo_id=F5_REPO, filename=filename, local_files_only=True)
+
+
+def _f5_vocab() -> str:
+    """The same vocabulary inference uses when no custom one is given (f5_tts/infer/examples/vocab.txt)."""
+    from importlib.resources import files
+
+    return str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
+
+
+def _free_slug(session: Session, slug: str, engine: str = QWEN) -> str:
+    taken = {row.slug for row in session.exec(select(CustomCheckpoint).where(CustomCheckpoint.engine == engine))}
     candidate, index = slug, 2
     while candidate in taken:
         candidate, index = f"{slug}-{index}", index + 1

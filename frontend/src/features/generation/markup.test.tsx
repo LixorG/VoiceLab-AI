@@ -80,6 +80,7 @@ describe('PlanPreview', () => {
     useGenerationStore.setState({
       plan: {
         segmented: true,
+        detected_speakers: [],
         warnings: ['Ningún motor actual genera risas.'],
         text_changes: [{ original: '15 €', replacement: 'quince euros', kind: 'número' }],
         normalize_language: 'es',

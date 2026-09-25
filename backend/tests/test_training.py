@@ -55,7 +55,8 @@ emit("done", output_dir=out, history=[{"epoch": 1, "talker_loss": 1.0, "predicto
 def trainer(tmp_path, monkeypatch, settings):
     script = tmp_path / "fake_trainer.py"
     script.write_text(FAKE_TRAINER, encoding="utf-8")
-    monkeypatch.setattr(training_service, "_trainer_command", lambda spec: [sys.executable, str(script), str(spec)])
+    monkeypatch.setattr(training_service, "_trainer_command",
+                        lambda spec, engine=None: [sys.executable, str(script), str(spec)])
     monkeypatch.setattr(training_service, "MIN_MINUTES", 0.05)
     monkeypatch.setattr(ModelManager, "resolve_device", lambda self: "cuda")
     from app.engines.qwen3tts.plugin import Qwen3TTSBackend

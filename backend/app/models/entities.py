@@ -224,6 +224,7 @@ class GenerationSegment(TimestampMixin, table=True):
     pause_before_ms: int = 0
     pause_after_ms: int = 0
     instruction: str | None = None
+    speaker: str | None = None  # dialogues: the character who says this line
     reference_snapshot: dict[str, Any] | None = _json(default=None)
     audio_path: str | None = None
     duration_s: float | None = None

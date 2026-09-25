@@ -25,8 +25,12 @@ def tone(freq: float, seconds: float = 2.0) -> np.ndarray:
 class FakeEngine:
     """The trained voice sounds like the real recordings (220 Hz); normal cloning a bit off (260 Hz)."""
 
-    def __init__(self, freq: float) -> None:
+    def __init__(self, freq: float, needs_reference: bool = False) -> None:
         self.freq, self.requests, self.prepared = freq, [], []
+        self.needs_reference = needs_reference
+
+    def capabilities(self, variant=None):
+        return SimpleNamespace(requires_reference_audio=self.needs_reference)
 
     def validate_parameters(self, params, variant):
         return dict(params)

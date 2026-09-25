@@ -6,6 +6,7 @@ same queue, same files, same database), so anything generated here also appears 
 
     python -m app.cli speak "Hola a todos" --voice "Hanna Miller" --out hola.wav
     python -m app.cli speak --file guion.txt --engine qwen3tts --takes 3 --format mp3
+    python -m app.cli speak --file dialogo.txt --speaker Ana=Hanna --speaker Luis=Carlos
     python -m app.cli voices
     python -m app.cli engines
 """
@@ -22,6 +23,8 @@ import sys
 import unicodedata
 from pathlib import Path
 from typing import Any
+
+from app.generation.dialogue import DEFAULT_TURN_PAUSE_MS
 
 BUSY_PORT_WARNING = ("AVISO: la aplicación parece estar abierta en el puerto {port}. Los dos procesos cargarían el "
                      "modelo en la misma GPU; cierra la aplicación si esto va lento o falla por memoria.")
@@ -84,6 +87,17 @@ def _parse_params(pairs: list[str]) -> dict[str, Any]:
                 pass
         params[key.strip()] = value
     return params
+
+
+def _resolve_cast(session: Any, pairs: list[str]) -> dict[str, str]:
+    """`--speaker Ana=Hanna` → {"Ana": <id del perfil>}, resolviendo la voz por nombre como en --voice."""
+    cast: dict[str, str] = {}
+    for pair in pairs:
+        speaker, sep, wanted = pair.partition("=")
+        if not sep or not speaker.strip() or not wanted.strip():
+            raise ValueError(f"Personaje mal escrito: «{pair}». Se escribe Personaje=Voz, por ejemplo Ana=Hanna.")
+        cast[speaker.strip()] = _resolve_voice(session, wanted.strip()).id
+    return cast
 
 
 def _resolve_voice(session: Any, wanted: str | None) -> Any:
@@ -163,6 +177,7 @@ async def _generate(args: argparse.Namespace, settings: Any) -> int:
             params=params, profile_id=profile.id if profile else None, reference_id=args.reference,
             emotion=args.emotion, intensity=args.intensity, takes=args.takes,
             markup=not args.no_markup, normalize=not args.no_normalize,
+            speakers=_resolve_cast(session, args.speaker), turn_pause_ms=args.turn_pause,
         )
         gen = await service.create(body)
         if not quiet:
@@ -309,6 +324,10 @@ def register(sub: Any) -> None:
     speak.add_argument("--seed", type=int, help="Semilla, para repetir exactamente una lectura")
     speak.add_argument("--takes", type=int, default=1, choices=range(1, 6), metavar="1-5",
                        help="Tomas por frase; se conserva la mejor")
+    speak.add_argument("--speaker", action="append", default=[], metavar="PERSONAJE=VOZ",
+                       help="Diálogo: con qué voz habla cada personaje; se puede repetir (--speaker Ana=Hanna)")
+    speak.add_argument("--turn-pause", type=int, default=DEFAULT_TURN_PAUSE_MS, metavar="MS",
+                       help="Pausa entre turnos de un diálogo, en milisegundos")
     speak.add_argument("--emotion", help="Emoción global, si el motor la admite")
     speak.add_argument("--intensity", type=int, default=50, metavar="0-100", help="Intensidad de la emoción")
     speak.add_argument("--no-markup", action="store_true", help="No interpretar marcas como [pausa:500ms]")

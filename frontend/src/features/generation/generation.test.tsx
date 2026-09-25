@@ -184,6 +184,8 @@ describe('generation store', () => {
       params: { speed: 1.1, seed: null, nfe_steps: 24 },
       reference_id: 'r1',
       takes: 1,
+      speakers: {},
+      turn_pause_ms: 450,
       profile_id: null,
       preview: true,
       emotion: null,

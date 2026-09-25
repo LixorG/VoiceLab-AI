@@ -9,6 +9,7 @@ import { GenerationList } from '@/features/generation/GenerationList'
 import { MarkupToolbar, PlanPreview } from '@/features/generation/MarkupTools'
 import { ParamsClipboardBar } from '@/features/generation/ParamsClipboard'
 import { BestTakeControl } from '@/features/generation/BestTakePanel'
+import { DialoguePanel } from '@/features/generation/DialoguePanel'
 import { BatchPanel, QueuePanel } from '@/features/generation/QueuePanel'
 import { ScriptPrep } from '@/features/generation/ScriptPrep'
 import { generationBlockers } from '@/features/generation/readiness'
@@ -27,7 +28,7 @@ const NO_VALUES: Record<string, never> = {}
 
 export function GeneratePage() {
   const mode = useUiStore((s) => s.mode)
-  const { text, setText, referenceId, profileId, emotion, intensity, markup, submitting, error, runtime, generate, generateVariations, loadPlan, clearError } =
+  const { text, setText, referenceId, profileId, emotion, intensity, markup, speakers, turnPauseMs, submitting, error, runtime, generate, generateVariations, loadPlan, clearError } =
     useGenerationStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [variationCount, setVariationCount] = useState(3)
@@ -54,7 +55,7 @@ export function GeneratePage() {
     if (!engineId) return
     const id = window.setTimeout(() => void loadPlan(), 450)
     return () => window.clearTimeout(id)
-  }, [text, emotion, intensity, markup, engineId, variantId, values, profileId, referenceId, loadPlan])
+  }, [text, emotion, intensity, markup, engineId, variantId, values, profileId, referenceId, speakers, turnPauseMs, loadPlan])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
@@ -92,6 +93,7 @@ export function GeneratePage() {
             </CardContent>
           </Card>
 
+          <DialoguePanel />
           <BatchPanel />
           <GenerationList />
         </div>
